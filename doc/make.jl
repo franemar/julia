@@ -142,6 +142,14 @@ end
 # Check if we are building a PDF
 const render_pdf = "pdf" in ARGS
 
+# Check if we are building a PDF
+const render_epub = "epub" in ARGS
+
+if render_epub
+    Pkg.add("DocumenterEpub")
+    using DocumenterEpub
+end
+
 # Generate a suitable markdown file from NEWS.md and put it in src
 function generate_markdown(basename)
     str = read(joinpath(@__DIR__, "..", "$basename.md"), String)
@@ -302,7 +310,7 @@ DevDocs = [
 ]
 
 
-if render_pdf
+if render_pdf || render_epub
 const PAGES = [
     "Manual" => ["index.md", Manual...],
     "Base" => BaseDocs,
@@ -388,7 +396,13 @@ DocMeta.setdocmeta!(
     recursive=true, warn=false,
 )
 
-const format = if render_pdf
+const format = if render_epub
+    EPUB(
+       color=true,           # syntax highlighting will use colors
+       lang="en",            # publication language
+       snap_animations=true  # only take first frame of an animated gif
+   )
+elseif render_pdf
     Documenter.LaTeX(
         platform = "texplatform=docker" in ARGS ? "docker" : "native"
     )
@@ -410,7 +424,10 @@ else
     )
 end
 
-const output_path = joinpath(buildrootdoc, "_build", (render_pdf ? "pdf" : "html"), "en")
+const output_path = joinpath(buildrootdoc, "_build",
+    (render_epub ? "epub" : (render_pdf ? "pdf" : "html")),
+    "en"
+)
 makedocs(
     source    = joinpath(buildrootdoc, "src"),
     build     = output_path,
@@ -424,7 +441,8 @@ makedocs(
     sitename  = "The Julia Language",
     authors   = "The Julia Project",
     pages     = PAGES,
-    remotes   = documenter_stdlib_remotes,
+    #remotes   = documenter_stdlib_remotes, --> check remote
+    #version="1.0" --> check remote get Julia lang version 
 )
 
 # Update URLs to external stdlibs (JuliaLang/julia#43199)
