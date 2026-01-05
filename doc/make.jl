@@ -509,6 +509,22 @@ function Documenter.Writers.HTMLWriter.expand_versions(dir::String, v::Versions)
     return Documenter.Writers.HTMLWriter.expand_versions(dir, v.versions)
 end
 
+
+# Export pandoc's TOC
+DevDocsTOC = []
+
+for i in DevDocs
+    for s in i.second
+        push!(DevDocsTOC, s)
+    end
+end
+
+for i in vcat("README.html", Manual, BaseDocs, StdlibDocs, DevDocsTOC)
+  println(string("_build\\html\\", replace(i, "md" => "html"), " ^"))
+end
+
+# Build pandoc's command
+
 if "deploy" in ARGS
     deploydocs(
         repo = "github.com/JuliaLang/docs.julialang.org.git",
