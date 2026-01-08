@@ -1,5 +1,3 @@
-cd \\wsl.localhost\AlmaLinux-10\home\franemar\git\default\julia\doc
-
 pandoc -f html -t epub3 ^
 _build\html\README.html ^
 _build\html\manual\getting-started.html ^

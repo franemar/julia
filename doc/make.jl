@@ -519,7 +519,7 @@ for i in DevDocs
     end
 end
 
-for i in vcat("README.html", Manual, BaseDocs, StdlibDocs, DevDocsTOC)
+for i in vcat("index.html", Manual, BaseDocs, StdlibDocs, DevDocsTOC)
   println(string("_build\\html\\", replace(i, "md" => "html"), " ^"))
 end
 
