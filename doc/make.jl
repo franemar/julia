@@ -519,11 +519,19 @@ for i in DevDocs
     end
 end
 
+# Build and export of pandoc's command
+f = open("./_build/html/en/gen-pandoc-Epub.sh", "w");
+
+write(f, "#!/bin/bash\n")
+write(f, "pandoc -f html -t epub3 -o juliadocs.epub \\\n")
+
 for i in vcat("index.html", Manual, BaseDocs, StdlibDocs, DevDocsTOC)
-  println(string("_build\\html\\", replace(i, "md" => "html"), " ^"))
+    write(f, string(replace(i, "md" => "html"), " \\\n"));
 end
 
-# Build pandoc's command
+close(f);
+
+
 
 if "deploy" in ARGS
     deploydocs(
