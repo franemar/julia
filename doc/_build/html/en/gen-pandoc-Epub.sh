@@ -1,5 +1,5 @@
 #!/bin/bash
-pandoc -f html -t epub3 -o juliadocs.epub \
+pandoc -f html -t epub3 -o juliadocs.epub --resource-path=./assets --toc \
 index.html \
 manual/getting-started.html \
 manual/installation.html \
