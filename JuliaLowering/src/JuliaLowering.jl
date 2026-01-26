@@ -16,6 +16,7 @@ using .JuliaSyntax: highlight, Kind, @KSet_str, is_leaf, children, numchildren,
     head, kind, flags, has_flags, filename, first_byte, last_byte, byte_range,
     sourcefile, source_location, span, sourcetext, is_literal, is_infix_op_call,
     is_postfix_op_call, @isexpr, SyntaxHead, is_syntactic_operator,
+    is_contextual_keyword,
     SyntaxGraph, SyntaxTree, SyntaxList, NodeId, SourceRef, SourceAttrType,
     ensure_attributes, ensure_attributes!, delete_attributes, new_id!, hasattr,
     setattr, setattr!, syntax_graph, is_compatible_graph,
@@ -33,6 +34,7 @@ _include("utils.jl")
 _include("macro_expansion.jl")
 _include("desugaring.jl")
 _include("scope_analysis.jl")
+_include("binding_analysis.jl")
 _include("closure_conversion.jl")
 _include("linear_ir.jl")
 _include("runtime.jl")

@@ -11,6 +11,9 @@ New language features
   - `ᵅ` (U+U+1D45), `ᵋ` (U+1D4B), `ᶲ` (U+1DB2), `˱` (U+02F1), `˲` (U+02F2), and `ₔ` (U+2094) can now also be used as
     operator suffixes, accessible as `\^alpha`, `\^epsilon`, `\^ltphi`, `\_<`, `\_>`, and `\_schwa` at the REPL
     ([#60285]).
+  - The `@label` macro can now create labeled blocks that can be exited early with `break name [value]`. Use
+    `@label name expr` for named blocks or `@label _ expr` for anonymous blocks. The `continue` statement also
+    supports labels with `continue name` to continue a labeled loop ([#60481]).
 
 Language changes
 ----------------
@@ -66,6 +69,9 @@ Standard library changes
 * `@test`, `@test_throws`, and `@test_broken` now support a `context` keyword argument
   that provides additional information displayed on test failure. This is useful for
   debugging which specific case failed in parameterized tests ([#60501]).
+
+* `@test_throws`, `@test_warn`, `@test_nowarn`, `@test_logs`, and `@test_deprecated` now support
+  `broken` and `skip` keyword arguments for consistency with `@test` ([#60543]).
 
 #### InteractiveUtils
 
