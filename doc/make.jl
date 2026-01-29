@@ -278,6 +278,7 @@ DevDocs = [
         "devdocs/jit.md",
         "devdocs/builtins.md",
         "devdocs/precompile_hang.md",
+        "devdocs/compiler_changes.md",
     ],
     "Developing/debugging Julia's C code" => [
         "devdocs/backtraces.md",

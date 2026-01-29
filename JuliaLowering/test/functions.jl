@@ -173,6 +173,14 @@ begin
 end
 """) === ("fallback", (Number, Float64), (Int, Int), "fallback")
 
+# Static parameter may be undefined
+@test JuliaLowering.include_string(test_mod, """
+begin
+    func_undef_static_param(x::Union{T,Nothing}) where T = @isdefined(T)
+    (func_undef_static_param(nothing), func_undef_static_param(42))
+end
+""") === (false, true)
+
 Base.eval(test_mod,
 :(struct X1{T} end)
 )
@@ -213,6 +221,22 @@ end
 
 (f_return_in_value_pos(), x)
 """) === (42, 0)
+
+@test JuliaLowering.include_string(test_mod, """
+function f_return_in_call()
+    f_return_in_call(return 123)
+end
+
+f_return_in_call()
+""") === 123
+
+@test JuliaLowering.include_string(test_mod, raw"""
+function f_return_in_interpolation()
+    :(1 + $(return 123))
+end
+
+f_return_in_interpolation()
+""") === 123
 
 @testset "Default positional arguments" begin
     @test JuliaLowering.include_string(test_mod, """
@@ -422,6 +446,15 @@ end
     @test values(test_mod.f_kw_slurp_some(x = 1)) === (;)
     @test values(test_mod.f_kw_slurp_some()) === (;)
 
+    # Slurping with defaults depending on keyword names
+    JuliaLowering.include_string(test_mod, """
+    function f_kw_slurp_dep(; a=1, b=a, kws...)
+        (a, b, length(kws))
+    end
+    """)
+    @test test_mod.f_kw_slurp_dep(; a=1) == (1, 1, 0)
+    @test test_mod.f_kw_slurp_dep(; a=2, c=3) == (2, 2, 1)
+
     # Keyword defaults which depend on other keywords.
     JuliaLowering.include_string(test_mod, """
     begin
@@ -508,8 +541,43 @@ end
     end
 end
 
-@testset "Generated functions" begin
+@testset "Assigned-to arguments" begin
+    # These examples are all macros, since they have specialized de-optimization
+    # behavior that sends un-optimized code straight to codegen. Normal compiled
+    # functions essentially always pass through SSA conversion on the way to the
+    # optimizer, erasing these slots (potentially hiding bugs in slot handling)
+
+    @test JuliaLowering.include_string(test_mod, raw"""
+    macro m_assigned_args_1(x)
+        x = x + 1
+        return x
+    end
+    var"@m_assigned_args_1"(LineNumberNode(0, nothing), Main, 2)
+    """; expr_compat_mode=true) == 3
+
+    @test JuliaLowering.include_string(test_mod, raw"""
+    macro m_assigned_args_2(x, y = 1)
+        (y, x) = (x + 1, y + 1)
+        return y - x
+    end
+    (
+        var"@m_assigned_args_2"(LineNumberNode(0, nothing), Main, 2),
+        var"@m_assigned_args_2"(LineNumberNode(0, nothing), Main, 1, 2),
+    )
+    """; expr_compat_mode=true) == (1, -1)
+
     for expr_compat_mode in (false, true)
+        @test JuliaLowering.include_string(test_mod, raw"""
+        macro m_assigned_args(ex)
+            ex = Base.remove_linenums!(ex)
+            return ex
+        end
+        ((@m_assigned_args 1 + 1), @m_assigned_args 1)
+        """; expr_compat_mode) == (2, 1)
+    end
+end
+
+@testset "Generated functions" begin; for expr_compat_mode in (false, true)
     @test JuliaLowering.include_string(test_mod, raw"""
     begin
         @generated function f_gen(x::NTuple{N,T}) where {N,T}
@@ -564,7 +632,105 @@ end
         f_gen_calls_macros(1)
     end
     """; expr_compat_mode) === "foo"
+end
+
+    genfunc_quote_s = """
+    begin
+        function f_gen_quote_1(::Tuple{T}) where {T}
+            out = :(:x1,first)
+            if @generated
+            else
+            end
+            return out
+        end
+
+        f_gen_quote_1((1,))
     end
+    """
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=true) == :(:x1,first)
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=false) ≈
+            @ast_ [K"tuple" [K"quote" "x1"::K"Identifier"] "first"::K"Identifier"]
+
+    genfunc_quote_s = """
+    begin
+        function f_gen_quote_2(::Tuple{T}) where {T}
+            out = nothing
+            if @generated
+                :(out = :(:x2,generated))
+            else
+                out = (:x2,nongen)
+            end
+            return out
+        end
+
+        f_gen_quote_2((1,))
+    end
+    """
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=true) == :(:x2,generated)
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=false) ≈
+            @ast_ [K"tuple" [K"quote" "x2"::K"Identifier"] "generated"::K"Identifier"]
+
+    genfunc_quote_s = """
+    begin
+        function f_gen_quote_3(::Tuple{T}) where {T}
+            if @generated
+            else
+            end
+            return :(:x4,after)
+        end
+
+        f_gen_quote_3((1,))
+    end
+    """
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=true) == :(:x4,after)
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=false) ≈
+            @ast_ [K"tuple" [K"quote" "x4"::K"Identifier"] "after"::K"Identifier"]
+
+    genfunc_quote_s = raw"""
+    begin
+        function f_gen_interpolate(::Tuple{T}) where {T}
+            out = :(:x1,first)
+            if @generated
+                out = :($out, generated)
+            else
+                out = :($out, nongen)
+            end
+            return out
+        end
+
+        f_gen_interpolate((1,))
+    end
+    """
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=true) == :((:x1,first),nongen)
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=false) ≈
+            @ast_ [K"tuple" [K"tuple"
+                             [K"quote" "x1"::K"Identifier"]
+                             "first"::K"Identifier"]
+                   "nongen"::K"Identifier"]
+
+    genfunc_quote_s = raw"""
+    begin
+        @eval function f_gen_quote_1(::Tuple{T}) where {T}
+            out = $(Expr(:quote, Expr(:call, :+, 1, Expr(:if, Expr(:generated), 1, 2))))
+            if @generated
+            else
+            end
+            return out
+        end
+        f_gen_quote_1((1,))
+    end
+    """
+    @test JuliaLowering.include_string(
+        test_mod, genfunc_quote_s; expr_compat_mode=true) ==
+            :(1 + $(Expr(:if, Expr(:generated), 1, 2)))
 
     # Test generated function edges to bindings
     # (see also https://github.com/JuliaLang/julia/pull/57230)

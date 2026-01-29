@@ -49,13 +49,42 @@ function Base.var"@label"(__context__::MacroContext, ex)
     @ast __context__ ex ex=>K"symbolic_label"
 end
 
+function Base.var"@label"(__context__::MacroContext, name, body)
+    # Handle `@label _ body` (anonymous) or `@label name body` (named)
+    k = kind(name)
+    if k == K"Identifier"
+        # `@label _ body` or `@label name body` - plain identifier
+    elseif is_contextual_keyword(k)
+        # Contextual keyword used as label name (e.g., `@label outer body`)
+    else
+        throw(MacroExpansionError(name, "Expected identifier for block label"))
+    end
+    # If body is a syntactic loop, wrap its body in a continue block
+    # This allows `continue name` to work by breaking to `name#cont`
+    body_kind = kind(body)
+    if body_kind == K"for" || body_kind == K"while"
+        cont_name = string(name.name_val, "#cont")
+        loop_body = body[2]
+        wrapped_body = @ast __context__ loop_body [K"symbolic_block"
+            cont_name::K"Identifier"
+            loop_body
+        ]
+        if body_kind == K"for"
+            body = @ast __context__ body [K"for" body[1] wrapped_body]
+        else  # while
+            body = @ast __context__ body [K"while" body[1] wrapped_body]
+        end
+    end
+    @ast __context__ __context__.macrocall [K"symbolic_block" name body]
+end
+
 function Base.var"@goto"(__context__::MacroContext, ex)
     @chk kind(ex) == K"Identifier"
     @ast __context__ ex ex=>K"symbolic_goto"
 end
 
 function Base.var"@locals"(__context__::MacroContext)
-    @ast __context__ __context__.macrocall [K"extension" "locals"::K"Symbol"]
+    @ast __context__ __context__.macrocall [K"locals"]
 end
 
 function Base.var"@isdefined"(__context__::MacroContext, ex)
@@ -96,8 +125,7 @@ function Base.var"@cfunction"(__context__::MacroContext, callable, return_type, 
         # Kinda weird semantics here - without `$`, the callable is a top level
         # expression evaluated within the module where the `@cfunction` is
         # expanded into.
-        fptr = @ast __context__ callable [K"inert"(
-                meta=CompileHints(:as_Expr, true))
+        fptr = @ast __context__ callable [K"inert"
             callable
         ]
         typ = Ptr{Cvoid}
@@ -326,10 +354,7 @@ end
 # For now we have our own versions
 function var"@islocal"(__context__::MacroContext, ex)
     @chk kind(ex) == K"Identifier"
-    @ast __context__ __context__.macrocall [K"extension"
-        "islocal"::K"Symbol"
-        ex
-    ]
+    @ast __context__ __context__.macrocall [K"islocal" ex]
 end
 
 """
