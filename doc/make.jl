@@ -720,7 +720,7 @@ function Documenter.Writers.HTMLWriter.expand_versions(dir::String, v::Versions)
 end
 
 
-# Export pandoc's TOC
+# Generation and export of pandoc's TOC
 DevDocsTOC = []
 
 for i in DevDocs
@@ -729,10 +729,13 @@ for i in DevDocs
     end
 end
 
-# Build and export of pandoc's command
+# Generation and export of pandoc's command
 f = open("./_build/html/en/gen-pandoc-Epub.sh", "w");
 
 write(f, "#!/bin/bash\n")
+
+# ☝ Check if needed: --resource-path=./assets #
+
 write(f, "pandoc -f html -t epub3 -o juliadocs.epub \\\n")
 
 for i in vcat("index.html", Manual, BaseDocs, StdlibDocs, DevDocsTOC)

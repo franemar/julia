@@ -53,3 +53,6 @@ repo_key
 # Buildkite: Ignore any agent keys (public or private) we have stored
 agent_key*
 contrib/ci-timing/Manifest.toml
+
+# Issue not taking care of doc/.gitignore, so we need to ignore the build directory here as well
+doc/_build
