@@ -294,11 +294,11 @@ end
 
 struct AUnionParam{T<:Union{Nothing,Float32,Float64}} end
 @test AUnionParam.body.hash == 0
-@test Type{AUnionParam}.hash != 0
-@test Type{AUnionParam{<:Union{Float32,Float64}}}.hash == 0
+@test Base._jl_type_cache_hash(Type{AUnionParam}) != 0
+@test Base._jl_type_cache_hash(Type{AUnionParam{<:Union{Float32,Float64}}}) == 0
 @test Type{AUnionParam{<:Union{Nothing,Float32,Float64}}} === Type{AUnionParam}
-@test Type{AUnionParam.body}.hash == 0
-@test Type{Base.Broadcast.Broadcasted}.hash != 0
+@test Base._jl_type_cache_hash(Type{AUnionParam.body}) == 0
+@test Base._jl_type_cache_hash(Type{Base.Broadcast.Broadcasted}) != 0
 
 
 @testset "issue 50628" begin
@@ -313,6 +313,15 @@ struct AUnionParam{T<:Union{Nothing,Float32,Float64}} end
     @test hash((Int64(5)//2)^25) != hash(2.5^25)
     # test hashing of rational with odd denominator
     @test hash(5//3) == hash(big(5)//3)
+end
+
+@testset "`Pair`" begin
+    @test (@inferred hash(0 => 1)) === (@inferred hash(false => true))
+    @test hash(0 => 1, UInt(0)) != hash(0 => 1, UInt(1))
+    let (x, y, z) = (1, 3, 7)
+        h = UInt(9)
+        @test hash(x => (y => z), h) != hash((x => y) => z, h)
+    end
 end
 
 @testset "concrete eval type hash" begin
@@ -340,4 +349,12 @@ end
         hash_generator = Base.hash_bytes(a, UInt64(Base.HASH_SEED), Base.HASH_SECRET)
         @test hash_generator === hash_pointer
     end
+end
+
+@testset "PartialStruct hash consistent with ==" begin
+    ps(t, f) = Core.PartialStruct(t, Any[f...])
+    @test hash(ps(Tuple{Int,Float64}, (Int, Float64))) ==
+          hash(ps(Tuple{Int,Float64}, (Int, Float64)))
+    @test hash(ps(Tuple{Int,Float64}, (Int, Float64))) !=
+          hash(ps(Tuple{Int,Float64}, (Int, Int)))
 end

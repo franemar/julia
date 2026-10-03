@@ -17,17 +17,22 @@ else
   PCRE_INCL_PATH := $(build_includedir)/pcre2.h
 endif
 
-define parse_features
-@printf "%s\n" "# $(2) features" >> $@
-@$(call PRINT_PERL, cat $(SRCDIR)/../src/features_$(1).h | perl -lne 'print "const JL_$(2)_$$1 = UInt32($$2)" if /^\s*JL_FEATURE_DEF(?:_NAME)?\(\s*(\w+)\s*,\s*([^,]+)\s*,.*\)\s*(?:\/\/.*)?$$/' >> $@)
+# Extract feature indices from cpufeatures generated headers.
+# The FeatureIndex enum has entries like: FEAT_SSE3 = 108,
+# We convert them to: const JL_X86_sse3 = UInt32(108)
+CPUFEATURES_GENDIR := $(build_includedir)/cpufeatures
+
+define parse_cpufeatures
+@printf "%s\n" "# $(2) features (from cpufeatures)" >> $@
+@$(call PRINT_PERL, perl -lne 'if (/^\s*FEAT_(\w+)\s*=\s*(\d+)/) { my $$n = lc($$1); print "const JL_$(2)_$$n = UInt32($$2)" }' $(1) >> $@)
 @printf "\n" >> $@
 endef
 
-$(BUILDDIR)/features_h.jl: $(SRCDIR)/../src/features_x86.h $(SRCDIR)/../src/features_aarch32.h $(SRCDIR)/../src/features_aarch64.h
+$(BUILDDIR)/features_h.jl: $(wildcard $(CPUFEATURES_GENDIR)/target_tables_*.h)
 	@-rm -f $@
-	@$(call parse_features,x86,X86)
-	@$(call parse_features,aarch32,AArch32)
-	@$(call parse_features,aarch64,AArch64)
+	@$(call parse_cpufeatures,$(CPUFEATURES_GENDIR)/target_tables_x86_64.h,X86)
+	@$(call parse_cpufeatures,$(CPUFEATURES_GENDIR)/target_tables_aarch64.h,AArch64)
+	@$(call parse_cpufeatures,$(CPUFEATURES_GENDIR)/target_tables_riscv64.h,RISCV)
 
 $(BUILDDIR)/pcre_h.jl: $(PCRE_INCL_PATH)
 	@$(call PRINT_PERL, $(CPP) -D PCRE2_CODE_UNIT_WIDTH=8 -dM $< | perl -nle '/^\s*#define\s+PCRE2_(\w*)\s*\(?($(PCRE_CONST))\)?u?\s*$$/ and print index($$1, "ERROR_") == 0 ? "const $$1 = Cint($$2)" : "const $$1 = UInt32($$2)"' | LC_ALL=C sort > $@)
@@ -80,7 +85,7 @@ else
 endif
 ifeq ($(OS), Darwin)
 	@printf "%s\n" "const MACOS_PRODUCT_VERSION = \"$(shell sw_vers -productVersion)\"" >> $@
-	@printf "%s\n" "const MACOS_PLATFORM_VERSION = \"$(shell xcrun --show-sdk-version)\"" >> $@
+	@printf "%s\n" "const MACOS_PLATFORM_VERSION = \"$(shell xcrun --sdk macosx --show-sdk-version)\"" >> $@
 endif
 	@printf "%s\n" "const BUILD_TRIPLET = \"$(BB_TRIPLET_LIBGFORTRAN_CXXABI)\"" >> $@
 
@@ -161,11 +166,10 @@ endif
 
 define symlink_system_library
 libname_$2 := $$(notdir $(call versioned_libname,$2,$3))
-libpath_$2 := $$(shell $$(call spawn,$$(LIBWHICH)) -p $$(libname_$2) 2>/dev/null)
 symlink_$2: $$(build_private_libdir)/$$(libname_$2)
 $$(build_private_libdir)/$$(libname_$2):
-	@if [ -e "$$(libpath_$2)" ]; then \
-		REALPATH=$$(libpath_$2); \
+	@REALPATH=`$$(call spawn,$$(LIBWHICH)) -p $$(libname_$2) 2>/dev/null`; \
+	if [ -e "$$$$REALPATH" ]; then \
 		$$(call resolve_path,REALPATH) && \
 		[ -e "$$$$REALPATH" ] && \
 		rm -f "$$@" && \
@@ -182,6 +186,21 @@ SYMLINK_SYSTEM_LIBRARIES += symlink_$2
 endif
 endef
 
+# Also create an unversioned `lib<name>` symlink next to the versioned one
+# created by `symlink_system_library`, for libraries that must be resolvable
+# via `-l<name>` (which only matches unversioned names).
+define symlink_system_library_unversioned
+symlink_$2_unversioned: $$(build_private_libdir)/$2.$$(SHLIB_EXT)
+$$(build_private_libdir)/$2.$$(SHLIB_EXT): | $$(build_private_libdir)/$$(libname_$2)
+	@if [ -e "$$(build_private_libdir)/$$(libname_$2)" ]; then \
+		printf "ln -sf %s %s\n" "$$(libname_$2)" "$$@" && \
+		ln -sf "$$(libname_$2)" "$$@"; \
+	fi
+ifneq ($$(USE_SYSTEM_$1),0)
+SYMLINK_SYSTEM_LIBRARIES += symlink_$2_unversioned
+endif
+endef
+
 # libexec executables
 symlink_p7zip: $(build_private_libexecdir)/7z$(EXE)
 
@@ -194,6 +213,25 @@ $(build_private_libexecdir)/7z$(EXE):
 	[ -e "$(7Z_PATH)" ] && \
 	rm -f "$@" && \
 	ln -sf "$(7Z_PATH)" "$@"
+
+symlink_zstd: $(build_private_libexecdir)/zstd$(EXE)
+symlink_zstdmt: $(build_private_libexecdir)/zstdmt$(EXE)
+
+ifneq ($(USE_SYSTEM_ZSTD),0)
+SYMLINK_SYSTEM_LIBRARIES += symlink_zstd symlink_zstdmt
+ZSTD_PATH := $(shell which zstd$(EXE))
+ZSTDMT_PATH := $(shell which zstdmt$(EXE))
+endif
+
+$(build_private_libexecdir)/zstd$(EXE):
+	[ -e "$(ZSTD_PATH)" ] && \
+	rm -f "$@" && \
+	ln -sf "$(ZSTD_PATH)" "$@"
+
+$(build_private_libexecdir)/zstdmt$(EXE):
+	[ -e "$(ZSTDMT_PATH)" ] && \
+	rm -f "$@" && \
+	ln -sf "$(ZSTDMT_PATH)" "$@"
 
 symlink_llvm_utils: $(build_depsbindir)/lld$(EXE) $(build_depsbindir)/dsymutil$(EXE)
 
@@ -245,6 +283,14 @@ $(eval $(call symlink_system_library,CSL,libssp,0,ALLOW_FAILURE))
 $(eval $(call symlink_system_library,CSL,libatomic,1,ALLOW_FAILURE))
 $(eval $(call symlink_system_library,CSL,libgomp,1,ALLOW_FAILURE))
 $(eval $(call symlink_system_library,CSL,libquadmath,0,ALLOW_FAILURE))
+# Base.Linking links pkgimages with `-lgcc_s` and `-latomic`, which only match
+# unversioned library names, so create those too (#63094)
+ifneq ($(OS),Darwin)
+ifneq ($(OS),WINNT)
+$(eval $(call symlink_system_library_unversioned,CSL,libgcc_s))
+$(eval $(call symlink_system_library_unversioned,CSL,libatomic))
+endif
+endif
 $(eval $(call symlink_system_library,PCRE,libpcre2-8))
 $(eval $(call symlink_system_library,DSFMT,libdSFMT))
 $(eval $(call symlink_system_library,LIBBLASTRAMPOLINE,libblastrampoline))

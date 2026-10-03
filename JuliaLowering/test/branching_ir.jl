@@ -224,16 +224,35 @@ begin
 end
 #---------------------
 LoweringError:
-begin
-    @label foo
-    @label foo
-#          └─┘ ── Label `foo` defined multiple times
-end
+#= none:3 =# - Label `foo` defined multiple times
+Expression:
+  label:foo
 
 ########################################
 # Error: using value of symbolic label
 x = @label foo
 #---------------------
 LoweringError:
-x = @label foo
-#          └─┘ ── misplaced label in value position
+#= none:1 =# - misplaced label in value position
+Expression:
+  label:foo
+
+########################################
+# Anonymous labeled block with valued break
+@label begin
+    a
+    break _ 42
+    b
+end
+#---------------------
+1   TestMod.a
+2   (= slot₁/loop-exit_result 42)
+3   (goto label₆)
+4   TestMod.b
+5   (= slot₁/loop-exit_result %₄)
+6   (isdefined slot₁/loop-exit_result)
+7   (gotoifnot %₆ label₉)
+8   (goto label₁₀)
+9   (= slot₁/loop-exit_result core.nothing)
+10  slot₁/loop-exit_result
+11  (return %₁₀)

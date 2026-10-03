@@ -56,14 +56,16 @@ Look up a symbol from a shared library handle, return callable function pointer 
 If the symbol cannot be found, this method throws an error, unless the keyword argument
 `throw_error` is set to `false`, in which case this method returns `nothing`.
 """
-function dlsym(hnd::Ptr, s::Union{Symbol,AbstractString}; throw_error::Bool = true)
+Base.@constprop :aggressive function dlsym(hnd::Ptr, s::Union{Symbol,AbstractString}; throw_error::Bool = true)
+    # Propagate `throw_error=true` to exclude `nothing` from the inferred return type,
+    # even when string conversion makes the keyword body too costly to inline.
     hnd == C_NULL && throw(ArgumentError("NULL library handle"))
     val = Ref(Ptr{Cvoid}(0))
     symbol_found = ccall(:jl_dlsym, Cint,
         (Ptr{Cvoid}, Cstring, Ref{Ptr{Cvoid}}, Cint, Cint),
         hnd, s, val, Int64(throw_error), Int64(1)
     )
-    if symbol_found == 0
+    if symbol_found == 0 && !throw_error
         return nothing
     end
     return val[]
@@ -171,7 +173,7 @@ end
 """
     dlclose(::Nothing)
 
-For the very common pattern usage pattern of
+For the very common usage pattern of
 
     try
         hdl = dlopen(library_name)
@@ -223,6 +225,7 @@ find_library(libname::Union{Symbol,AbstractString}, extrapaths=String[]) =
 Given a library `handle` from `dlopen`, return the full path.
 """
 function dlpath(handle::Ptr{Cvoid})
+    handle == C_NULL && throw(ArgumentError("NULL library handle"))
     p = ccall(:jl_pathname_for_handle, Cstring, (Ptr{Cvoid},), handle)
     s = unsafe_string(p)
     Sys.iswindows() && Libc.free(p)
@@ -262,30 +265,6 @@ File extension for dynamic libraries (e.g. dll, dylib, so) on the current platfo
 """
 dlext
 
-if (Sys.islinux() || Sys.isbsd()) && !Sys.isapple()
-    struct dl_phdr_info
-        # Base address of object
-        addr::Cuint
-
-        # Null-terminated name of object
-        name::Ptr{UInt8}
-
-        # Pointer to array of ELF program headers for this object
-        phdr::Ptr{Cvoid}
-
-        # Number of program headers for this object
-        phnum::Cshort
-    end
-
-    # This callback function called by dl_iterate_phdr() on Linux and BSD's
-    # DL_ITERATE_PHDR(3) on freebsd
-    function dl_phdr_info_callback(di::dl_phdr_info, size::Csize_t, dynamic_libraries::Vector{String})
-        name = unsafe_string(di.name)
-        push!(dynamic_libraries, name)
-        return Cint(0)
-    end
-end
-
 """
     dllist()
 
@@ -302,13 +281,10 @@ function dllist()
             name = unsafe_string(ccall(:_dyld_get_image_name, Cstring, (UInt32,), i))
             push!(dynamic_libraries, name)
         end
-    elseif Sys.islinux() || Sys.isbsd()
-        callback = @cfunction(dl_phdr_info_callback, Cint,
-                              (Ref{dl_phdr_info}, Csize_t, Ref{Vector{String}}))
-        ccall(:dl_iterate_phdr, Cint, (Ptr{Cvoid}, Ref{Vector{String}}), callback, dynamic_libraries)
-        popfirst!(dynamic_libraries)
-        filter!(!isempty, dynamic_libraries)
-    elseif Sys.iswindows()
+    elseif Sys.iswindows() || Sys.islinux() || Sys.isbsd()
+        # `dl_iterate_phdr` must be handled by C, since otherwise arbitrary Julia
+        # code (in finalizers / ccall symbol resolution) may compete for the dynamic
+        # linker lock held during its callback
         ccall(:jl_dllist, Cint, (Any,), dynamic_libraries)
     else
         # unimplemented
@@ -325,16 +301,16 @@ Helper type for lazily constructed library paths for use with [`LazyLibrary`](@r
 Path pieces are stored unevaluated and joined with `joinpath()` when the library is first
 accessed. Arguments must be able to have `string()` called on them.
 
-# Example
-
-```julia
-const mylib = LazyLibrary(LazyLibraryPath(artifact_dir, "lib", "libmylib.so.1.2.3"))
-```
-
 !!! compat "Julia 1.11"
     `LazyLibraryPath` was added in Julia 1.11.
 
 See also [`LazyLibrary`](@ref), [`BundledLazyLibraryPath`](@ref).
+
+# Examples
+
+```julia
+const mylib = LazyLibrary(LazyLibraryPath(artifact_dir, "lib", "libmylib.so.1.2.3"))
+```
 """
 struct LazyLibraryPath
     pieces::Tuple{Vararg{Any}}
@@ -348,8 +324,16 @@ Base.print(io::IO, llp::LazyLibraryPath) = print(io, string(llp))
 # Helper to get `$(private_shlibdir)` at runtime
 struct PrivateShlibdirGetter; end
 const private_shlibdir = Base.OncePerProcess{String}() do
-    libname = ifelse(isdebugbuild(), "libjulia-internal-debug", "libjulia-internal")
-    dirname(dlpath(libname))
+    p = ccall(:jl_get_libjulia_internal_path, Cstring, ())
+    if p == C_NULL
+        # libjulia-internal is linked into the executable, so it cannot tell us
+        # where the private libraries live. Assume the installed layout, which
+        # keeps them in `$(private_shlibdir)` relative to the executable.
+        return Sys.iswindows() ? Sys.BINDIR : abspath(Sys.BINDIR, Base.PRIVATE_LIBDIR)
+    end
+    path = unsafe_string(p)
+    Sys.iswindows() && Libc.free(p)
+    return dirname(path)
 end
 Base.string(::PrivateShlibdirGetter) = private_shlibdir()
 
@@ -400,8 +384,13 @@ This is a thread-safe mechanism for on-demand library initialization.
 The dlopen operation is thread-safe: only one thread loads the library, acquired after the
 release store of the reference to each dependency from loading of each dependency. Other
 tasks block until loading completes. The handle is then cached and reused for all subsequent
-calls (there is no dlclose for lazy library and dlclose should not be called on the returned
-handled).
+calls (there is no dlclose for lazy library and dlclose should not be called on the returned handle).
+
+!!! compat "Julia 1.11"
+    `LazyLibrary` was added in Julia 1.11.
+
+See also [`LazyLibraryPath`](@ref), [`BundledLazyLibraryPath`](@ref), [`dlopen`](@ref),
+[`dlsym`](@ref), [`add_dependency!`](@ref).
 
 # Examples
 
@@ -418,12 +407,6 @@ const libbar = LazyLibrary("libbar"; dependencies=[libfoo])
 For more examples including platform-specific libraries, lazy path construction, and
 migration from `__init__()` patterns, see the manual section on
 [Using LazyLibrary for Lazy Loading](@ref man-lazylibrary).
-
-!!! compat "Julia 1.11"
-    `LazyLibrary` was added in Julia 1.11.
-
-See also [`LazyLibraryPath`](@ref), [`BundledLazyLibraryPath`](@ref), [`dlopen`](@ref),
-[`dlsym`](@ref), [`add_dependency!`](@ref).
 """
 mutable struct LazyLibrary
     # Name and flags to open with

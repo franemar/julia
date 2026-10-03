@@ -227,6 +227,12 @@ end
             @test ldexp(floatmin(T)/3, 11) == T(ldexp(big(floatmin(T)/3), 11))
             @test ldexp(floatmin(T)/11, -10) == T(ldexp(big(floatmin(T)/11), -10))
             @test ldexp(-floatmin(T)/11, -10) == T(ldexp(big(-floatmin(T)/11), -10))
+            # results between nextfloat(zero(T))/2 and nextfloat(zero(T)) round up (ties to even)
+            p = -exponent(nextfloat(zero(T)))
+            @test ldexp(T(0.75), -p) === nextfloat(zero(T))
+            @test ldexp(-nextfloat(T(1)), -p-1) === -nextfloat(zero(T))
+            @test ldexp(T(1), -p-1) === zero(T)
+            @test ldexp(prevfloat(T(1)), -p-1) === zero(T)
         end
     end
 end
@@ -621,7 +627,7 @@ end
                 end
             end
         end
-        @testset begin
+        @testset "trig d/pi functions exactness" begin
             # If the machine supports fma (fused multiply add), we require exact equality.
             # Otherwise, we only require approximate equality.
             if has_fma[T]
@@ -644,6 +650,15 @@ end
                 T == Rational{Int} && @test my_eq(sinpi(5//6), 0.5)
                 T == Rational{Int} && @test my_eq(sincospi(5//6)[1], 0.5)
             end
+        end
+
+        @testset "tanpi for Complex argument" begin
+            x = Complex{T}(12/11, 2/7)
+            @test tanpi(x) ≈ sinpi(x) / cospi(x)
+            # issue #57450
+            y = Complex{T}(0.5, 1000)
+            @test isfinite(tanpi(y))
+            @test tanpi(y) ≈ im
         end
     end
     scdm = sincosd(missing)
@@ -696,6 +711,8 @@ end
     @test tanpi(-1) === 0.0
     @test tanpi(2) === 0.0
     @test tanpi(-2) === -0.0
+    @test_throws DomainError tanpi(Inf)
+    @test_throws DomainError tanpi(-Inf32)
     @test sinc(1) == 0
     @test sinc(complex(1,0)) == 0
     @test sinc(0) == 1
@@ -750,6 +767,14 @@ end
     @testset "accuracy of `cosc` around the origin" begin
         for t in (Float32, Float64)
             @test ulp_error_maximum(cosc, range(start = t(-1), stop = t(1), length = 5000)) < 4
+        end
+    end
+end
+
+@testset "accuracy of `sinpi`, `cospi` around the origin" begin
+    for f in (sinpi, cospi)
+        for t in (Float32, Float64)
+            @test ulp_error_maximum(f, range(start = t(-0.25), stop = t(0.25), length = 5000)) < (has_fma[t] ? 1.0 : 1.5)
         end
     end
 end
@@ -967,6 +992,8 @@ end
     f19872b(x) = x ^ (-1024)
     @test 0 < f19872b(2.0) < 1e-300
     @test issubnormal(2.0 ^ (-1024))
+    @test !issubnormal(big(2.0 ^ (-1024)))
+    @test !issubnormal(nextfloat(BigFloat(0)))
     @test issubnormal(f19872b(2.0))
     @test !issubnormal(f19872b(0.0))
     @test f19872a(2.0) === 32.0
@@ -1545,6 +1572,19 @@ end
         @test func(1.6341681540852291e308, -2., floatmax(Float64)) == -1.4706431733081426e308 # case where inv(a)*c*a == Inf
         @test func(-2., 1.6341681540852291e308, floatmax(Float64)) == -1.4706431733081426e308 # case where inv(b)*c*b == Inf
         @test func(-1.9369631f13, 2.1513551f-7, -1.7354427f-24) == -4.1670958f6
+        # a*b+c rounds (in Float64) to exactly halfway between two Float32 subnormals
+        @test func(reinterpret(Float32, 0x97000800), reinterpret(Float32, 0x1cfff001), reinterpret(Float32, 0x00010002)) === reinterpret(Float32, 0x00010001)
+        # abhi+c is exactly halfway between two Float64 values and ablo decides the rounding
+        @test func(reinterpret(Float64, 0x3ca0000000000001), reinterpret(Float64, 0x3feffffffffffffe), reinterpret(Float64, 0x3ff0000000000001)) === reinterpret(Float64, 0x3ff0000000000001)
+        @test func(-floatmin(Float64), nextfloat(0.0), nextfloat(0.0)) === nextfloat(0.0)
+        # tiny normal b makes the fma-free two_mul inexact
+        @test func(reinterpret(Float64, 0xfee492df2d70dce5), reinterpret(Float64, 0x801ad51356e60077), reinterpret(Float64, 0xbf1140536185456e)) === 1.669822474902846e-21
+        # a*b+c rounded to Float32 is exactly halfway between two Float16 values
+        @test func(Float16(-336.0), Float16(-37.25), Float16(0.0003653)) === Float16(1.252e4)
+        for _ in 1:2^18
+            a, b, c = reinterpret.(Float16, rand(UInt16, 3))
+            @test isequal(func(a, b, c), Float16(big(a) * big(b) + big(c))) context=(a,b,c)
+        end
     end
 end
 
@@ -1619,6 +1659,31 @@ end
     n = Int64(1024 / log2(E))
     @test E^n == Inf
     @test E^float(n) == Inf
+
+    # integer power of a negative Float16/Float32 base must keep its sign when the
+    # exponent bypasses `pow_by_squaring` (|n| outside -2^12:3*2^13); the sign `s`
+    # used to be computed and then dropped.
+    @testset "sign of $T integer powers" for T in (Float16, Float32)
+        x = -nextfloat(one(T))
+        for n in (24577, 32769, -24577, -32769)   # odd, outside pow_by_squaring range
+            @test signbit(x^n)
+        end
+        for n in (24578, 32768, -24578)            # even, outside pow_by_squaring range
+            @test !signbit(x^n)
+        end
+    end
+    @testset "sign across clamped $T integer exponents" for (T, I) in
+            ((Float16, Int32), (Float32, Int32), (Float64, Int64))
+        W = widen(I)
+        nmax = W(typemax(I))
+        nmin = W(typemin(I))
+        @test !signbit((-T(2))^(nmax + 1))
+        @test signbit((-T(2))^(nmax + 2))
+        @test signbit((-T(2))^(nmin - 1))
+        @test !signbit((-T(2))^(nmin - 2))
+        @test signbit((-zero(T))^24577)
+        @test signbit((-zero(T))^-24577)
+    end
 
     # issue #55831
     @testset "literal pow zero sign" begin

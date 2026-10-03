@@ -1,6 +1,7 @@
 module JuxtuposeTest
+    using ..JuliaLowering
     macro emit_juxtupose()
-        :(10x)
+        JuliaLowering.@legacy_quote_to_syntax :(10x)
     end
 end
 
@@ -18,7 +19,7 @@ x.a
 x."b"
 #---------------------
 1   TestMod.x
-2   (call top.getproperty %₁ "b")
+2   (call top.getproperty %₁ (inert "b"))
 3   (return %₂)
 
 ########################################
@@ -31,10 +32,12 @@ x."b"
 
 ########################################
 # Error: Wrong number of children in `.`
-@ast_ [K"." "x"::K"Identifier" "a"::K"Identifier" 3::K"Integer"]
+@ast_ [:. "x"::identifier "a"::identifier 3::value]
 #---------------------
 LoweringError:
-#= line 1 =# - `.` form requires either one or two children
+#= line 1 =# - invalid syntax: unknown form `.` or number of arguments 3
+Expression:
+  (. x a 3)
 
 ########################################
 # Error: Placeholder value used
@@ -148,7 +151,7 @@ LoweringError:
 #---------------------
 LoweringError:
 (a=1; b=2, c=3)
-#   └────────┘ ── unexpected semicolon in tuple - use `,` to separate tuple elements
+#   └────────┘ ── cannot mix tuple `(a,b,c)` and named tuple `(;a,b,c)` syntax
 
 ########################################
 # Error: Named tuple field dots in rhs
@@ -156,7 +159,8 @@ LoweringError:
 #---------------------
 LoweringError:
 (; a=xs...)
-#    └───┘ ── `...` cannot be used in a value for a named tuple field
+#    └───┘ ── unexpected `...`
+splatting can only be done into a `call`, `tuple`, `curly`, or array-like expression
 
 ########################################
 # Error: Named tuple field invalid lhs
@@ -164,7 +168,7 @@ LoweringError:
 #---------------------
 LoweringError:
 (; a[]=1)
-#  └─┘ ── invalid named tuple field name
+#  └─┘ ── expected identifier
 
 ########################################
 # Error: Named tuple element with weird dot syntax
@@ -172,7 +176,7 @@ LoweringError:
 #---------------------
 LoweringError:
 (; a."b")
-#  └───┘ ── invalid named tuple element
+#    └─┘ ── expected identifier
 
 ########################################
 # Error: Named tuple element without valid name
@@ -180,7 +184,7 @@ LoweringError:
 #---------------------
 LoweringError:
 (; a=1, f())
-#       └─┘ ── Invalid named tuple element
+#       └─┘ ── expected identifier, `=`, or `...` after semicolon
 
 ########################################
 # Error: Modules not allowed inside blocks
@@ -209,7 +213,7 @@ function f()
 #   ┌───────
     module C
     end
-#─────┘ ── `module` is only allowed at top level
+#─────┘ ── this syntax is only allowed at top level
 end
 
 ########################################
@@ -235,7 +239,7 @@ LoweringError:
 #---------------------
 LoweringError:
 {x, y}
-└────┘ ── { } syntax is reserved for future use
+└────┘ ── `{ }` outside of `where` is reserved for future use
 
 ########################################
 # Error: braces matrix syntax
@@ -243,15 +247,17 @@ LoweringError:
 #---------------------
 LoweringError:
 {x y; y z}
-└────────┘ ── { } syntax is reserved for future use
+└────────┘ ── `{ }` outside of `where` is reserved for future use
 
 ########################################
 # Error: Test AST which has no source form and thus must have been constructed
 # programmatically (eg, a malformed if)
-@ast_ [K"if"]
+@ast_ [:if]
 #---------------------
 LoweringError:
-#= line 1 =# - expected `numchildren(ex) >= 2`
+#= line 1 =# - expected (if cond body) or (if cond body else)
+Expression:
+  (if)
 
 ########################################
 # Error: @atomic in wrong position
@@ -260,7 +266,9 @@ let
 end
 #---------------------
 LoweringError:
-#= none:2 =# - unimplemented or unsupported atomic declaration
+#= none:2 =# - unimplemented or unsupported `atomic` declaration
+Expression:
+  (atomic x)
 
 ########################################
 # GC.@preserve support
@@ -270,14 +278,13 @@ end
 #---------------------
 1   TestMod.a
 2   TestMod.b
-3   (= slot₂/s (gc_preserve_begin %₁ %₂))
+3   (gc_preserve_begin %₁ %₂)
 4   TestMod.f
 5   TestMod.a
 6   TestMod.b
-7   (= slot₁/r (call %₄ %₅ %₆))
-8   (gc_preserve_end slot₂/s)
-9   slot₁/r
-10  (return %₉)
+7   (call %₄ %₅ %₆)
+8   (gc_preserve_end %₃)
+9   (return %₇)
 
 ########################################
 # Error: GC.@preserve bad args
@@ -295,36 +302,28 @@ end
 # @eval without module
 @eval $f(x, y)
 #---------------------
-1   JuliaLowering.eval
-2   (call core.tuple :expr_compat_mode)
-3   (call core.apply_type core.NamedTuple %₂)
-4   (call core.tuple false)
-5   (call %₃ %₄)
-6   TestMod.f
-7   (call core.tuple %₆)
-8   (call JuliaLowering.interpolate_ast SyntaxTree (inert_syntaxtree (call ($ f) x y)) %₇)
-9   (= slot₁/eval_result (call core.kwcall %₅ %₁ TestMod %₈))
-10  latestworld
-11  slot₁/eval_result
-12  (return %₁₁)
+1   TestMod.f
+2   (call core.tuple %₁)
+3   (call JuliaLowering.interpolate_syntax (syntaxinert (call (syntaxunquote f) x y)) %₂)
+4   (call JuliaSyntax.fill_context %₃ SyntaxContext(#=omitted=#))
+5   (= slot₁/eval_result (call JuliaLowering.eval TestMod %₄))
+6   latestworld
+7   slot₁/eval_result
+8   (return %₇)
 
 ########################################
 # @eval with module
 @eval mod $f(x, y)
 #---------------------
-1   JuliaLowering.eval
-2   (call core.tuple :expr_compat_mode)
-3   (call core.apply_type core.NamedTuple %₂)
-4   (call core.tuple false)
-5   (call %₃ %₄)
-6   TestMod.mod
-7   TestMod.f
-8   (call core.tuple %₇)
-9   (call JuliaLowering.interpolate_ast SyntaxTree (inert_syntaxtree (call ($ f) x y)) %₈)
-10  (= slot₁/eval_result (call core.kwcall %₅ %₁ %₆ %₉))
-11  latestworld
-12  slot₁/eval_result
-13  (return %₁₂)
+1   TestMod.mod
+2   TestMod.f
+3   (call core.tuple %₂)
+4   (call JuliaLowering.interpolate_syntax (syntaxinert (call (syntaxunquote f) x y)) %₃)
+5   (call JuliaSyntax.fill_context %₄ SyntaxContext(#=omitted=#))
+6   (= slot₁/eval_result (call JuliaLowering.eval %₁ %₅))
+7   latestworld
+8   slot₁/eval_result
+9   (return %₈)
 
 ########################################
 # Juxtaposition
@@ -336,14 +335,7 @@ end
 4   (return %₃)
 
 ########################################
-# Juxtaposition - check the juxtapose multiply is resolved to `JuxtuposeTest.*` when
-# emitted by the macro in the JuxtuposeTest module.
-#
-# This is consistent with Julia's existing system but it's not entirely clear
-# this is good - perhaps we should resolve to Base.* instead? Resolving to the
-# module-local version makes it exactly equivalent to `*`. But one might argue
-# this is confusing because the symbol `*` appears nowhere in the user's source
-# code.
+# Juxtaposition - resolve to macro's mod's `JuxtuposeTest.*`
 JuxtuposeTest.@emit_juxtupose
 #---------------------
 1   TestMod.JuxtuposeTest.*
@@ -355,7 +347,7 @@ JuxtuposeTest.@emit_juxtupose
 # @cfunction expansion with global generic function as function argument
 @cfunction(callable, Int, (Int, Float64))
 #---------------------
-1   (cfunction Ptr{Nothing} (inert callable) (static_eval TestMod.Int) (static_eval (call core.svec TestMod.Int TestMod.Float64)) :ccall)
+1   (cfunction Ptr{Nothing} (static_eval TestMod.callable) (static_eval TestMod.Int) (static_eval (call core.svec TestMod.Int TestMod.Float64)) :ccall)
 2   (return %₁)
 
 ########################################
@@ -403,42 +395,30 @@ end
 @ccall foo(x::X, y::Y)::R
 #---------------------
 1   TestMod.X
-2   TestMod.x
-3   (= slot₁/arg1 (call Base.cconvert %₁ %₂))
-4   TestMod.Y
+2   TestMod.Y
+3   TestMod.x
+4   (call top.cconvert %₁ %₃)
 5   TestMod.y
-6   (= slot₂/arg2 (call Base.cconvert %₄ %₅))
-7   TestMod.X
-8   slot₁/arg1
-9   (call Base.unsafe_convert %₇ %₈)
-10  TestMod.Y
-11  slot₂/arg2
-12  (call Base.unsafe_convert %₁₀ %₁₁)
-13  slot₁/arg1
-14  slot₂/arg2
-15  (foreigncall :foo (static_eval TestMod.R) (static_eval (call core.svec TestMod.X TestMod.Y)) 0 :($(QuoteNode((:ccall, 0x0000, false)))) %₉ %₁₂ %₁₃ %₁₄)
-16  (return %₁₅)
+6   (call top.cconvert %₂ %₅)
+7   (call top.unsafe_convert %₁ %₄)
+8   (call top.unsafe_convert %₂ %₆)
+9   (foreigncall (foreignsymbol (tuple (inert foo))) (static_eval TestMod.R) (static_eval (call core.svec TestMod.X TestMod.Y)) 0 (inert (:ccall, 0x0000, false)) %₇ %₈ %₄ %₆)
+10  (return %₉)
 
 ########################################
 # @ccall lowering with gc_safe
-@ccall foo(x::X; y::Y)::R gc_safe=true
+@ccall gc_safe=true foo(x::X; y::Y)::R
 #---------------------
 1   TestMod.X
-2   TestMod.x
-3   (= slot₁/arg1 (call Base.cconvert %₁ %₂))
-4   TestMod.Y
+2   TestMod.Y
+3   TestMod.x
+4   (call top.cconvert %₁ %₃)
 5   TestMod.y
-6   (= slot₂/arg2 (call Base.cconvert %₄ %₅))
-7   TestMod.X
-8   slot₁/arg1
-9   (call Base.unsafe_convert %₇ %₈)
-10  TestMod.Y
-11  slot₂/arg2
-12  (call Base.unsafe_convert %₁₀ %₁₁)
-13  slot₁/arg1
-14  slot₂/arg2
-15  (foreigncall :foo (static_eval TestMod.R) (static_eval (call core.svec TestMod.X TestMod.Y)) 1 :($(QuoteNode((:ccall, 0x0000, true)))) %₉ %₁₂ %₁₃ %₁₄)
-16  (return %₁₅)
+6   (call top.cconvert %₂ %₅)
+7   (call top.unsafe_convert %₁ %₄)
+8   (call top.unsafe_convert %₂ %₆)
+9   (foreigncall (foreignsymbol (tuple (inert foo))) (static_eval TestMod.R) (static_eval (call core.svec TestMod.X TestMod.Y)) 1 (inert (:ccall, 0x0000, true)) %₇ %₈ %₄ %₆)
+10  (return %₉)
 
 ########################################
 # non-macro ccall with vararg in signature, but none provided
@@ -461,7 +441,7 @@ ccall(:fcntl, Cint, (RawFD, Cint, Cint...), s, F_GETFL)
 #---------------------
 MacroExpansionError while expanding @ccall in module Main.TestMod:
 @ccall strlen("foo"::Cstring)
-#                            └ ── Expected a return type annotation `::SomeType`
+#                            └ ── expected a return type annotation `::SomeType`
 
 ########################################
 # Error: No argument type on @ccall
@@ -472,7 +452,7 @@ MacroExpansionError while expanding @ccall in module Main.TestMod:
 #                           └───┘ ── argument needs a type annotation
 
 ########################################
-# Error: @ccall varags without one fixed argument
+# Error: @ccall varargs without one fixed argument
 @ccall foo(; x::Int)::Int
 #---------------------
 MacroExpansionError while expanding @ccall in module Main.TestMod:
@@ -485,31 +465,39 @@ MacroExpansionError while expanding @ccall in module Main.TestMod:
 #---------------------
 MacroExpansionError while expanding @ccall in module Main.TestMod:
 @ccall foo(; x::Int; y::Float64)::Int
-#                  └──────────┘ ── Multiple parameter blocks not allowed
+#          └──────┘ ── C ABI prohibits varargs without one required argument
+
+########################################
+# Error: Bad @ccall first arg
+@ccall $(:(foo))(1::Cint)::Cint
+#---------------------
+MacroExpansionError while expanding @ccall in module Main.TestMod:
+@ccall $(:(foo))(1::Cint)::Cint
+#      └───────┘ ── interpolated value should be a variable or expression, not a literal name or tuple
 
 ########################################
 # Error: Bad @ccall option
-@ccall foo(x::Int)::Int bad_opt
+@ccall bad_opt foo(x::Int)::Int
 #---------------------
 MacroExpansionError while expanding @ccall in module Main.TestMod:
-@ccall foo(x::Int)::Int bad_opt
-#                       └─────┘ ── Bad option to ccall
+@ccall bad_opt foo(x::Int)::Int
+#      └─────┘ ── bad option to ccall
 
 ########################################
 # Error: Unknown @ccall option name
-@ccall foo(x::Int)::Int bad_opt=true
+@ccall bad_opt=true foo(x::Int)::Int
 #---------------------
 MacroExpansionError while expanding @ccall in module Main.TestMod:
-@ccall foo(x::Int)::Int bad_opt=true
-#                       └─────┘ ── Unknown option name for ccall
+@ccall bad_opt=true foo(x::Int)::Int
+#      └─────┘ ── unknown option name for ccall
 
 ########################################
 # Error: Unknown option type
-@ccall foo(x::Int)::Int gc_safe="hi"
+@ccall gc_safe="hi" foo(x::Int)::Int
 #---------------------
 MacroExpansionError while expanding @ccall in module Main.TestMod:
-@ccall foo(x::Int)::Int gc_safe="hi"
-#                               └──┘ ── gc_safe must be true or false
+@ccall gc_safe="hi" foo(x::Int)::Int
+#              └──┘ ── gc_safe must be true or false
 
 ########################################
 # Error: unary & syntax
@@ -517,7 +505,7 @@ MacroExpansionError while expanding @ccall in module Main.TestMod:
 #---------------------
 LoweringError:
 &x
-└┘ ── invalid syntax
+└┘ ── invalid syntax: unknown form `&` or number of arguments 1
 
 ########################################
 # Error: $ outside quote/string
@@ -525,7 +513,7 @@ $x
 #---------------------
 LoweringError:
 $x
-└┘ ── `$` expression outside string or quote block
+└┘ ── `$` expression outside string or quote
 
 ########################################
 # Error: splat outside call
@@ -533,7 +521,8 @@ x...
 #---------------------
 LoweringError:
 x...
-└──┘ ── `...` expression outside call
+└──┘ ── unexpected `...`
+splatting can only be done into a `call`, `tuple`, `curly`, or array-like expression
 
 ########################################
 # `include` should increment world age
@@ -548,14 +537,31 @@ include("hi.jl")
 # Const function assignment syntax (legacy)
 const f(x::Int)::Int = x+1
 #---------------------
-1   TestMod.f
-2   TestMod.x
-3   TestMod.Int
-4   (call core.typeassert %₂ %₃)
-5   (call %₁ %₄)
-6   TestMod.Int
-7   (call core.typeassert %₅ %₆)
-8   (return %₇)
+1   (call core.define_method TestMod :f)
+2   latestworld
+3   TestMod.f
+4   (call core.TypeEqOf %₃)
+5   TestMod.Int
+6   (call core.svec %₄ %₅)
+7   (call core.svec)
+8   SourceLocation::1:6
+9   (call core.svec %₆ %₇ %₈)
+10  (call core.define_method TestMod TestMod.f %₉
+    --- code_info
+    slots: [slot₁/#self#(!read) slot₂/x slot₃/tmp(!read)]
+    1   TestMod.Int
+    2   TestMod.+
+    3   (= slot₃/tmp (call %₂ slot₂/x 1))
+    4   (call core.isa slot₃/tmp %₁)
+    5   (gotoifnot %₄ label₇)
+    6   (goto label₉)
+    7   (call top.convert %₁ slot₃/tmp)
+    8   (= slot₃/tmp (call core.typeassert %₇ %₁))
+    9   slot₃/tmp
+    10  (return %₉)
+11  latestworld
+12  TestMod.f
+13  (return %₁₂)
 
 ########################################
 # Error: Destructuring assignment method definitions (broken, legacy)
@@ -572,3 +578,13 @@ T{U}, (x::Float64, g()) = [Bool, (1, 2)]
 LoweringError:
 T{U}, (x::Float64, g()) = [Bool, (1, 2)]
 #                  └─┘ ── invalid assignment location
+
+########################################
+# aliasscope form: should be passed through unless implementation changes
+Base.Experimental.@aliasscope 1
+#---------------------
+1   (aliasscope)
+2   (= slot₁/aliasscope_result 1)
+3   (popaliasscope)
+4   slot₁/aliasscope_result
+5   (return %₄)

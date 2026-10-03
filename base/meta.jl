@@ -304,12 +304,12 @@ end
 
 ParseError(msg::AbstractString) = ParseError(msg, nothing)
 
-# N.B.: Should match definition in src/ast.c:jl_parse
 function parser_for_module(mod::Union{Module, Nothing})
-    mod === nothing && return Core._parse
-    isdefined(mod, Symbol("#_internal_julia_parse")) ?
-        getglobal(mod, Symbol("#_internal_julia_parse")) :
-        Core._parse
+    if mod isa Module && invokelatest(isdefined, mod, Symbol("#_internal_julia_parse"))
+        invokelatest(getglobal, mod, Symbol("#_internal_julia_parse"))
+    else
+        Base.VersionedParse(Base.VERSION_EDITION)
+    end
 end
 
 function _parse_string(text::AbstractString, filename::AbstractString,
@@ -407,11 +407,15 @@ function parse(str::AbstractString;
     return ex
 end
 
-function parseatom(text::AbstractString, pos::Integer; filename="none", lineno=1, mod::Union{Nothing, Module}=nothing, _parse = parser_for_module(mod))
+function parseatom(text::AbstractString, pos::Integer; filename="none",
+                   lineno=1, mod::Union{Nothing, Module}=nothing,
+                   _parse = parser_for_module(mod))
     return _parse_string(text, String(filename), lineno, pos, :atom, _parse)
 end
 
-function parseall(text::AbstractString; filename="none", lineno=1, mod::Union{Nothing, Module}=nothing, _parse = parser_for_module(mod))
+function parseall(text::AbstractString; filename="none", lineno=1,
+                  mod::Union{Nothing, Module}=nothing,
+                  _parse = parser_for_module(mod))
     ex,_ = _parse_string(text, String(filename), lineno, 1, :all, _parse)
     return ex
 end
@@ -530,7 +534,7 @@ function _partially_inline!(@nospecialize(x), slot_replacements::Vector{Any},
             end
             return x
         elseif head === :cfunction
-            @assert !isa(type_signature, UnionAll) || !isempty(spvals)
+            @assert !isa(type_signature, UnionAll) || !isempty(static_param_values)
             if !isa(x.args[2], QuoteNode) # very common no-op
                 x.args[2] = _partially_inline!(x.args[2], slot_replacements, type_signature,
                                                static_param_values, slot_offset,
@@ -548,7 +552,9 @@ function _partially_inline!(@nospecialize(x), slot_replacements::Vector{Any},
                 elseif i == 4
                     @assert isa(x.args[4], Int)
                 elseif i == 5
-                    @assert isa((x.args[5]::QuoteNode).value, Union{Symbol, Tuple{Symbol, UInt16, Bool}})
+                    @assert isa((x.args[5]::QuoteNode).value,
+                                Union{Symbol, Tuple{Symbol, UInt16, Bool}, Tuple{Symbol, UInt16, Bool, Bool},
+                                      Tuple{Symbol, UInt16, Bool, Bool, Bool}})
                 else
                     x.args[i] = _partially_inline!(x.args[i], slot_replacements,
                                                    type_signature, static_param_values,

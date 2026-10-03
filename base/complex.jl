@@ -8,7 +8,7 @@ Complex number type with real and imaginary part of type `T`.
 `ComplexF16`, `ComplexF32` and `ComplexF64` are aliases for
 `Complex{Float16}`, `Complex{Float32}` and `Complex{Float64}` respectively.
 
-See also: [`Real`](@ref), [`complex`](@ref), [`real`](@ref).
+See also [`Real`](@ref), [`complex`](@ref), [`real`](@ref).
 """
 struct Complex{T<:Real} <: Number
     re::T
@@ -22,7 +22,7 @@ Complex(x::Real) = Complex(x, zero(x))
 
 The imaginary unit.
 
-See also: [`imag`](@ref), [`angle`](@ref), [`complex`](@ref).
+See also [`imag`](@ref), [`angle`](@ref), [`complex`](@ref).
 
 # Examples
 ```jldoctest
@@ -61,7 +61,7 @@ float(::Type{Complex{T}}) where {T} = Complex{float(T)}
 
 Return the real part of the complex number `z`.
 
-See also: [`imag`](@ref), [`reim`](@ref), [`complex`](@ref), [`isreal`](@ref), [`Real`](@ref).
+See also [`imag`](@ref), [`reim`](@ref), [`complex`](@ref), [`isreal`](@ref), [`Real`](@ref).
 
 # Examples
 ```jldoctest
@@ -76,7 +76,7 @@ real(z::Complex) = z.re
 
 Return the imaginary part of the complex number `z`.
 
-See also: [`conj`](@ref), [`reim`](@ref), [`adjoint`](@ref), [`angle`](@ref).
+See also [`conj`](@ref), [`reim`](@ref), [`adjoint`](@ref), [`angle`](@ref).
 
 # Examples
 ```jldoctest
@@ -105,7 +105,7 @@ reim(z) = (real(z), imag(z))
     real(T::Type)
 
 Return the type that represents the real part of a value of type `T`.
-e.g: for `T == Complex{R}`, returns `R`.
+e.g., for `T == Complex{R}`, returns `R`.
 Equivalent to `typeof(real(zero(T)))`.
 
 # Examples
@@ -120,7 +120,8 @@ Float64
 real(T::Type) = typeof(real(zero(T)))
 real(::Type{T}) where {T<:Real} = T
 real(C::Type{<:Complex}) = fieldtype(C, 1)
-real(::Type{Union{}}, slurp...) = Union{}
+real(::Type{Union{}}) = Union{}
+real(::Type{Union{}}, slurp...) = throw(MethodError(real, (Union{}, slurp...)))
 
 """
     isreal(x)::Bool
@@ -188,7 +189,10 @@ Union{Missing, Complex{Int64}}
 """
 complex(::Type{T}) where {T<:Real} = Complex{T}
 complex(::Type{Complex{T}}) where {T<:Real} = Complex{T}
-complex(::Type{Union{}}, slurp...) = Union{}
+complex(::Type{Union{}}) = Union{}
+# Keep the slurp signature for bottom-type dispatch pruning (typemap_slurp_search),
+# but do not let invalid arities contribute a successful result to inference.
+complex(::Type{Union{}}, slurp...) = throw(MethodError(complex, (Union{}, slurp...)))
 
 flipsign(x::Complex, y::Real) = ifelse(signbit(y), -x, x)
 
@@ -265,7 +269,7 @@ end
 
 Compute the complex conjugate of a complex number `z`.
 
-See also: [`angle`](@ref), [`adjoint`](@ref).
+See also [`angle`](@ref), [`adjoint`](@ref).
 
 # Examples
 ```jldoctest
@@ -513,7 +517,7 @@ function ssqs(x::T, y::T) where T<:Real
         ρ = convert(T, Inf)
     elseif isinf(ρ) || (ρ==0 && (x!=0 || y!=0)) || ρ<nextfloat(zero(T))/(2*eps(T)^2)
         m::T = max(abs(x), abs(y))
-        k = m==0 ? m : exponent(m)
+        k = m==0 ? 0 : exponent(m)
         xk, yk = ldexp(x,-k), ldexp(y,-k)
         ρ = xk*xk + yk*yk
     end
@@ -593,7 +597,7 @@ More accurate method for `cis(pi*x)` (especially for large `x`).
 See also [`cis`](@ref), [`sincospi`](@ref), [`exp`](@ref), [`angle`](@ref).
 
 # Examples
-```jldoctest
+```julia-repl
 julia> cispi(10000)
 1.0 + 0.0im
 
@@ -621,7 +625,7 @@ Compute the phase angle in radians of a complex number `z`.
 Returns a number `-pi ≤ angle(z) ≤ pi`, and is thus discontinuous
 along the negative real axis.
 
-See also: [`atan`](@ref), [`cis`](@ref), [`rad2deg`](@ref).
+See also [`atan`](@ref), [`cis`](@ref), [`rad2deg`](@ref).
 
 # Examples
 ```jldoctest
@@ -843,15 +847,23 @@ function _cpow(z::Union{T,Complex{T}}, p::Union{T,Complex{T}}) where T
         else
             r = -zᵣ
             θ = copysign(Tf(π),imag(z))
-            rᵖ = r^pᵣ * exp(-pᵢ*θ)
-            ϕ = pᵣ*θ + pᵢ*log(r)
+            logr = log(r)
+            re_log, im_phase = pᵣ*logr, pᵢ*θ
+            lim = log(floatmax(Tf)) - one(Tf)
+            rᵖ = (abs(re_log) < lim && abs(im_phase) < lim) ?
+                r^pᵣ * exp(-im_phase) : exp(re_log - im_phase)
+            ϕ = pᵣ*θ + pᵢ*logr
         end
     else
         pᵣ, pᵢ = reim(p)
         r = abs(z)
         θ = angle(z)
-        rᵖ = r^pᵣ * exp(-pᵢ*θ)
-        ϕ = pᵣ*θ + pᵢ*log(r)
+        logr = log(r)
+        re_log, im_phase = pᵣ*logr, pᵢ*θ
+        lim = log(floatmax(Tf)) - one(Tf)
+        rᵖ = (abs(re_log) < lim && abs(im_phase) < lim) ?
+            r^pᵣ * exp(-im_phase) : exp(re_log - im_phase)
+        ϕ = pᵣ*θ + pᵢ*logr
     end
 
     if isfinite(ϕ)

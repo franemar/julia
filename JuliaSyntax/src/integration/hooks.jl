@@ -3,6 +3,12 @@
 
 const _has_v1_6_hooks  = VERSION >= v"1.6"
 const _has_v1_10_hooks = isdefined(Core, :_setparser!)
+const _has_v1_14_version_hooks = isdefined(Base, :VERSION_EDITION)
+const VERSION_EDITION = @static if _has_v1_14_version_hooks
+    Base.VERSION_EDITION
+else
+    (Int(VERSION.major), Int(VERSION.minor))
+end
 
 struct ErrorSpec
     child_idx::Int
@@ -21,7 +27,6 @@ end
 # within its parent and the node itself.
 function first_tree_error(c::RedTreeCursor, error_cursor::GreenTreeCursor)
     @assert !is_leaf(c) && !is_error(c)
-    first_child = first_error = nothing
     it = reverse_nontrivia_children(c)
     r = iterate(it)
     local child
@@ -94,7 +99,9 @@ function _incomplete_tag(theerror::ErrorSpec, codelen)
         return :block
     elseif kp in KSet"for while function if"
         return i == 1 ? :other : :block
-    elseif kp in KSet"module struct"
+    elseif kp == K"module"
+        return i <= 2 ? :other : :block
+    elseif kp == K"struct"
         return i == 1 ? :other : :block
     elseif kp == K"do"
         return i < 3  ? :other : :block
@@ -162,7 +169,8 @@ end
 # Debug log file for dumping parsed code
 const _debug_log = Ref{Union{Nothing,IO}}(nothing)
 
-function core_parser_hook(code, filename::String, lineno::Int, offset::Int, options::Symbol; syntax_version = v"1.13")
+function core_parser_hook(code, filename::String, lineno::Int, offset::Int,
+                          options::Symbol, edition::Tuple{Int, Int})
     try
         # TODO: Check that we do all this input wrangling without copying the
         # code buffer
@@ -184,7 +192,7 @@ function core_parser_hook(code, filename::String, lineno::Int, offset::Int, opti
             write(_debug_log[], code)
         end
 
-        stream = ParseStream(code, offset+1; version = syntax_version)
+        stream = ParseStream(code, offset+1; version=VersionNumber(edition))
         if options === :statement || options === :atom
             # To copy the flisp parser driver:
             # * Parsing atoms      consumes leading trivia
@@ -304,6 +312,9 @@ end
 function core_parser_hook(code, filename, offset, options)
     core_parser_hook(code, filename, 1, offset, options)
 end
+function core_parser_hook(code, filename, lineno, offset, options)
+    core_parser_hook(code, filename, lineno, offset, options, VERSION_EDITION)
+end
 
 if _has_v1_10_hooks
     Base.incomplete_tag(e::JuliaSyntax.ParseError) = e.incomplete_tag
@@ -330,19 +341,10 @@ use `enable_in_core!(false)`.
 Keyword arguments:
 * `freeze_world_age` - Use a fixed world age for the parser to prevent
   recompilation of the parser due to any user-defined methods (default `true`).
-* `debug_filename` - File name of parser debug log (defaults to `nothing` or
-  the value of `ENV["JULIA_SYNTAX_DEBUG_FILE"]`).
 """
-function enable_in_core!(enable=true; freeze_world_age = true,
-        debug_filename   = get(ENV, "JULIA_SYNTAX_DEBUG_FILE", nothing))
+function enable_in_core!(enable=true; freeze_world_age = true)
     if !_has_v1_6_hooks
         error("Cannot use JuliaSyntax as the main Julia parser in Julia version $VERSION < 1.6")
-    end
-    if enable && !isnothing(debug_filename)
-        _debug_log[] = open(debug_filename, "w")
-    elseif !enable && !isnothing(_debug_log[])
-        close(_debug_log[])
-        _debug_log[] = nothing
     end
     if enable
         world_age = freeze_world_age ? Base.get_world_counter() : typemax(UInt)
@@ -354,13 +356,14 @@ function enable_in_core!(enable=true; freeze_world_age = true,
     nothing
 end
 
-
 #-------------------------------------------------------------------------------
 # Tools to call the reference flisp parser
 #
 # Call the flisp parser
 function _fl_parse_hook(code, filename, lineno, offset, options)
-    @static if VERSION >= v"1.8.0-DEV.1370" # https://github.com/JuliaLang/julia/pull/43876
+    @static if _has_v1_14_version_hooks
+        Base.fl_parse(code, filename, lineno, offset, options, VERSION_EDITION)
+    elseif VERSION >= v"1.8.0-DEV.1370" # https://github.com/JuliaLang/julia/pull/43876
         return Core.Compiler.fl_parse(code, filename, lineno, offset, options)
     elseif _has_v1_6_hooks
         return Core.Compiler.fl_parse(code, filename, offset, options)

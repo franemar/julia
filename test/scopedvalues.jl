@@ -86,7 +86,7 @@ end
         @test sprint(show, sval, context=(:module=>Core,)) == "Base.ScopedValues.ScopedValue{$Int}(2)"
         objid = sprint(show, Base.objectid(sval))
         let str = sprint(show, Core.current_scope(), context=(:module=>Core,))
-            @test startswith(str, "Base.ScopedValues.Scope")
+            @test startswith(str, "Base.Scope")
             @test contains(str, "Base.ScopedValues.ScopedValue{$Int}@$objid => 2")
         end
     end
@@ -267,4 +267,21 @@ using Base.ScopedValues: ScopedValue, with
 end
 @testset "issue 59483" begin
     test_59483()
+end
+
+# issue #53584 - ScopedValue should not allocate when accessed
+const sv_53584 = ScopedValue([0])
+@noinline function access_scoped_53584()
+    v = sv_53584[]
+    v[1] += 1
+    return nothing
+end
+function run_53584()
+    @with sv_53584=>[0] for _ in 1:100_000
+        access_scoped_53584()
+    end
+end
+@testset "issue #53584" begin
+    run_53584() # warmup
+    @test (@allocated run_53584()) < 10_000
 end

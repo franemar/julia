@@ -3,6 +3,8 @@
 using Test
 using Libdl
 
+@test isempty(Test.detect_closure_boxes(Libdl))
+
 # these could fail on an embedded installation
 # but for now, we don't handle that case
 dlls = Libdl.dllist()
@@ -26,6 +28,15 @@ end
 # library handle pointer must not be NULL
 @test_throws ArgumentError Libdl.dlsym(C_NULL, :foo)
 @test_throws ArgumentError Libdl.dlsym_e(C_NULL, :foo)
+@test_throws ArgumentError Libdl.dlpath(C_NULL)
+
+# dlsym can only return nothing when throw_error=false.
+@testset "dlsym return type inference ($S)" for S in (Symbol, String)
+    @test Base.infer_return_type(Libdl.dlsym, Tuple{Ptr{Cvoid}, S}) === Ptr{Cvoid}
+    @test Base.infer_return_type(Tuple{Ptr{Cvoid}, S}) do hnd, s
+        Libdl.dlsym(hnd, s; throw_error=false)
+    end === Union{Nothing, Ptr{Cvoid}}
+end
 
 # Find the library directory by finding the path of libjulia-internal (or libjulia-internal-debug,
 # as the case may be) to get the private library directory
@@ -39,6 +50,15 @@ elseif Base.isdebugbuild()
     dirname(abspath(Libdl.dlpath("libjulia-internal-debug")))
 else
     dirname(abspath(Libdl.dlpath("libjulia-internal")))
+end
+
+# libjulia-internal is a shared library here, so it reports its own path
+let p = ccall(:jl_get_libjulia_internal_path, Cstring, ())
+    @test p != C_NULL
+    Sys.iswindows() && Libc.free(p)
+end
+if !Base.DARWIN_FRAMEWORK
+    @test realpath(Base.Libc.Libdl.private_shlibdir()) == realpath(private_libdir)
 end
 
 @test !isempty(Libdl.find_library(["libccalltest"], [private_libdir]))
@@ -225,7 +245,7 @@ mktempdir() do dir
     # Add an absurdly long entry to the load path to verify it doesn't lead to a buffer overflow
     push!(Base.DL_LOAD_PATH, joinpath(dir, join(rand('a':'z', 10000))))
 
-    # Add the temporary directors to load path by absolute path
+    # Add the temporary directory to load path by absolute path
     push!(Base.DL_LOAD_PATH, dir)
 
     # Test that we can now open that file

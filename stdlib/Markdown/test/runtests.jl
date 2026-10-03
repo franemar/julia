@@ -4,6 +4,8 @@ using Test, Markdown, StyledStrings
 import Markdown: MD, Paragraph, Header, Italic, Bold, Strikethrough, LineBreak, Table, Code, LaTeX, Footnote
 import Base: show
 
+@test isempty(Test.detect_closure_boxes(Markdown))
+
 # Basics
 # Equality is checked by making sure the HTML output is
 # the same – the structure itself may be different.
@@ -427,7 +429,7 @@ end
      1 | 2
     """
     @test latex(table) ==
-        "\\begin{tabular}\n{r | r}\na & b \\\\\n\\hline\n1 & 2 \\\\\n\\end{tabular}\n"
+        "\\begin{tabular}\n{l | l}\na & b \\\\\n\\hline\n1 & 2 \\\\\n\\end{tabular}\n"
 
     # mime output
     @test sprint(show, "text/plain", book) ==
@@ -614,7 +616,7 @@ end
     a  | b
     ---|---
     1  | 2""" == MD(Table(Any[["a","b"],
-                              ["1","2"]], [:r, :r]))
+                              ["1","2"]], [:l, :l]))
 
     @test md"""
     | a  |  b | c |
@@ -623,7 +625,7 @@ end
                                                       Any[["d",Code("gh"),"hg"],
                                                           ["hgh",Bold("jhj"),"ge"],
                                                           "f"]],
-                                                  [:l, :r, :r]))
+                                                  [:l, :r, :l]))
     @test md"""
     |   | b |
     |:--|--:|
@@ -670,6 +672,13 @@ end
     table = Markdown.parse(text)
     @test text == Markdown.plain(table)
     @test Markdown.html(table) == """<table><tr><th align="left">a</th><th align="right">b</th></tr><tr><td align="left"><code>x | y</code></td><td align="right">2</td></tr></table>\n"""
+
+    # a delimiter cell with no colon means no alignment, which GFM renders left-aligned
+    table = Markdown.parse("|a|b|c|d|\n|---|:--|--:|:-:|\n|1|2|3|4|").content[1]
+    @test table.align == [:l, :l, :r, :c]
+    @test Markdown.parse(Markdown.plain(table)).content[1].align == table.align
+    @test Markdown.html(Markdown.parse("|a|\n|---|\n|1|")) ==
+        """<table><tr><th align="left">a</th></tr><tr><td align="left">1</td></tr></table>\n"""
 end
 
 @testset "LaTeX extension" begin
@@ -1281,6 +1290,28 @@ end
     @test !occursin(Base.text_colors[:underline], lines[end])
 end
 
+@testset "code blocks are faced as code #61456" begin
+    function codefaces(md)
+        buf = Base.AnnotatedIOBuffer()
+        show(buf, MIME("text/plain"), md)
+        str = read(seekstart(buf), Base.AnnotatedString)
+        [(String(str[a.region]), a.value) for a in Base.annotations(str) if a.label === :face]
+    end
+    # Syntax highlighting is conservative, so a lone identifier picks up no
+    # highlighting of its own; it must still be faced as code.
+    for lang in ("", "julia", "julia-repl", "jldoctest", "text")
+        @test codefaces(Markdown.MD(Markdown.Code(lang, "VERSION"))) ==
+            [("VERSION", :markdown_code)]
+    end
+    # Highlighting is layered over the code face rather than replacing it.
+    let faces = codefaces(Markdown.MD(Markdown.Code("julia", "f() = 1 # c")))
+        @test ("f() = 1 # c", :markdown_code) ∈ faces
+        @test ("# c", :julia_comment) ∈ faces
+    end
+    @test ("julia>", :markdown_julia_prompt) ∈
+        codefaces(Markdown.MD(Markdown.Code("julia-repl", "julia> x")))
+end
+
 @testset "table rendering with term #25213" begin
     t = """
         a   |   b
@@ -1736,6 +1767,24 @@ end
     @test str == "  abc\n   | def"
     # non-breaking version: four leading spaces got preserved
     @test str_nbsp == "  abc\n  $nbsp| def"
+end
+
+@testset "Hack for handling <br>" begin
+    md = Markdown.parse("""
+    1<br>
+    2<br >
+    3<br/>
+    4<br />
+    5<BR>
+    6<BR >
+    7<BR/>
+    8<BR />
+    """)
+
+    @test length(md[1].content) == 16
+    @test all(i -> md[1].content[i] isa LineBreak, 2:2:16)
+    @test all(i -> md[1].content[i] isa String, 1:2:15)
+
 end
 
 include("test_spec_roundtrip_common.jl")

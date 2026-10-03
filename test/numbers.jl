@@ -133,6 +133,18 @@ end
         @test (min(NaN,Inf), min(NaN,-Inf), min(-NaN,Inf), min(-NaN,-Inf)) ≣ (NaN,NaN,NaN,NaN)
         @test minmax(-Inf,NaN) ≣ (min(-Inf,NaN), max(-Inf,NaN))
     end
+    for S in Base.BitInteger_types, T in Base.BitInteger_types
+        xvals = S <: Signed ? [typemin(S), -one(S), zero(S), one(S), typemax(S)] : [zero(S), one(S), typemax(S)]
+        yvals = T <: Signed ? [typemin(T), -one(T), zero(T), one(T), typemax(T)] : [zero(T), one(T), typemax(T)]
+        for x in xvals, y in yvals
+            z = @inferred min(x, y)
+            @test z <= x && z <= y && z in (x, y)
+            z = @inferred max(x, y)
+            @test z >= x && z >= y && z in (x, y)
+            z = @inferred minmax(x, y)
+            @test z == (min(x, y), max(x, y))
+        end
+    end
 end
 @testset "Base._extrema_rf for float" begin
     for T in (Float16, Float32, Float64, BigFloat)
@@ -144,11 +156,13 @@ end
             z = ordered[min(i1,j1)], ordered[max(i2,j2)]
             @test Base._extrema_rf(x, y) === z
         end
+        # a NaN operand wins, but its sign is not preserved: the sign of a NaN
+        # result is non-deterministic, so compare with `isequal` rather than `===`
         for i in 1:2, j1 in 1:6, j2 in 1:6 # unordered test (only 1 NaN)
             x = unorded[i] , unorded[i]
             y = ordered[j1], ordered[j2]
-            @test Base._extrema_rf(x, y) === x
-            @test Base._extrema_rf(y, x) === x
+            @test Base._extrema_rf(x, y) ≣ x
+            @test Base._extrema_rf(y, x) ≣ x
         end
         for i in 1:2, j in 1:2 # unordered test (2 NaNs)
             x = unorded[i], unorded[i]
@@ -244,6 +258,11 @@ end
     @test muladd(big(1//1),2,3) == big(1//1)*2+3
     @test muladd(1.0,2,3) == 1.0*2+3
     @test muladd(big(1.0),2,3) == big(1.0)*2+3
+    @test muladd(Inf, false, 3) === 3.0
+    @test muladd(Inf, true, 3) === Inf
+    @test muladd(false, NaN, 3) === 3.0
+    @test muladd(true, NaN, 3) === NaN
+    @test muladd(true, true, 3) === 4
 end
 # lexing typemin(Int64)
 @test (-9223372036854775808)^1 == -9223372036854775808
@@ -653,14 +672,14 @@ end
     @test eltype(copysign(-1//2,-1//2)) <: Rational
 
     # Verify type stability with rational (x is positive)
-    @test eltype(copysign(-1//2,1)) <: Rational
-    @test eltype(copysign(-1//2,BigInt(1))) <: Rational
-    @test eltype(copysign(-1//2,1.0)) <: Rational
-    @test eltype(copysign(-1//2,1//2)) <: Rational
-    @test eltype(copysign(-1//2,-1)) <: Rational
-    @test eltype(copysign(-1//2,-BigInt(1))) <: Rational
-    @test eltype(copysign(-1//2,-1.0)) <: Rational
-    @test eltype(copysign(-1//2,-1//2)) <: Rational
+    @test eltype(copysign(1//2,1)) <: Rational
+    @test eltype(copysign(1//2,BigInt(1))) <: Rational
+    @test eltype(copysign(1//2,1.0)) <: Rational
+    @test eltype(copysign(1//2,1//2)) <: Rational
+    @test eltype(copysign(1//2,-1)) <: Rational
+    @test eltype(copysign(1//2,-BigInt(1))) <: Rational
+    @test eltype(copysign(1//2,-1.0)) <: Rational
+    @test eltype(copysign(1//2,-1//2)) <: Rational
 
     # test x = NaN
     @test isnan(copysign(0/0,1))
@@ -1770,7 +1789,7 @@ end
         @test cld(-1.1, 0.1) == div(-1.1, 0.1, RoundUp)   ==  ceil(big(-1.1)/big(0.1)) == -11.0
         @test fld(-1.1, 0.1) == div(-1.1, 0.1, RoundDown) == floor(big(-1.1)/big(0.1)) == -12.0
     end
-    @testset "issue  #49450" begin
+    @testset "issue #49450" begin
         @test div(514, Float16(0.75)) === Float16(685)
         @test fld(514, Float16(0.75)) === Float16(685)
         @test cld(515, Float16(0.75)) === Float16(687)
@@ -1790,6 +1809,42 @@ end
         @test fld(11, Float32(1.4305115e-6)) === Float32(7_689_557)
         @test cld(16, Float32(2.8014183e-6)) === Float32(5_711_393)
         @test cld(17, Float32(2.2053719e-6)) === Float32(7_708_451)
+
+        @test fld(1.5046328f-36, -3.3409559485880944e-52) === -4.503599545179259e15
+        @test cld(1.5046328f-36, -3.3409559485880944e-52) === -4.503599545179258e15
+
+        @test fld(9007199254740994.0, 3.0) === 3002399751580331.0
+        @test cld(9007199254740994.0, 3.0) === 3002399751580332.0
+
+        @test fld(2.0^52, 1.5) === 3.00239975158033e15
+        @test cld(2.0^52, 1.5) === 3.002399751580331e15
+
+        @test fld(1.0, 1.1102230246251568e-16) === 9.00719925474099e15
+        @test cld(1.0, 1.1102230246251568e-16) === 9.007199254740991e15
+
+        @test fld(5.368709120000001e8, 5.960464521947985e-8) === 9.007199187632128e15
+        @test cld(5.368709120000001e8, 5.960464521947985e-8) === 9.007199187632129e15
+
+        @test fld(1.6856322854563416e16, 3.8274770451988434) === 4.40402977091864e15
+        @test cld(1.6856322854563416e16, 3.8274770451988434) === 4.404029770918641e15
+
+        Random.seed!(123)
+        for T in (Float16, Float32, Float64, BigFloat)
+            p = precision(T)
+            for e in T(2).^(-6:2), s1 in (+1, -1), s2 in (+1, -1), r in 1:5
+                z = rand(T)
+                x = s1 * ldexp(1 + rand(T), rand(0:p))
+                y = s2 * z * eps(x/z) / e
+                _fld, _cld = e ≤ 1 ? (fld, cld) : (/, /)
+                if T == BigFloat
+                    @test fld(x, y) == T(setprecision(() -> _fld(x, y), p + 16))
+                    @test cld(x, y) == T(setprecision(() -> _cld(x, y), p + 16))
+                else
+                    @test fld(x, y) == T(_fld(widen(x), widen(y)))
+                    @test cld(x, y) == T(_cld(widen(x), widen(y)))
+                end
+            end
+        end
     end
 end
 @testset "return types" begin
@@ -2407,10 +2462,15 @@ let x = big(-0.0)
     @test signbit(x) && !signbit(abs(x))
 end
 
-@testset "mod1 and fld1" begin
+@testset "mod1 and cld" begin
     @test all(x -> (m=mod1(x,3); 0<m<=3), -5:+5)
-    @test all(x -> x == (fld1(x,3)-1)*3 + mod1(x,3), -5:+5)
-    @test all(x -> fldmod1(x,3) == (fld1(x,3), mod1(x,3)), -5:+5)
+    @test all(x -> x == (cld(x,3)-1)*3 + mod1(x,3), -5:+5)
+    @test all(x -> cldmod1(x,3) == (cld(x,3), mod1(x,3)), -5:+5)
+    # the legacy names promote mixed arguments first, unlike `cld`
+    @test fld1(0x05, -3) === -1
+    @test fldmod1(0x05, -3) === (-1, -1)
+    @test fld1(0x05, 3) === 2
+    @test_throws InexactError fld1(UInt(5), -3)
 end
 #Issue #5570
 @test map(x -> Int(mod1(UInt(x),UInt(5))), 0:15) == [5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5]
@@ -2733,22 +2793,30 @@ end
     @test rem(T(1), T(2), RoundDown)    == 1
     @test rem(T(1), T(2), RoundUp)      == -1
     @test rem(T(1), T(2), RoundFromZero) == -1
+    @test rem(T(1), T(2), RoundNearestTiesUp) == -1
+    @test rem(T(1), T(2), RoundNearestTiesAway) == -1
     @test rem(T(1.5), T(2), RoundToZero)  == 1.5
     @test rem(T(1.5), T(2), RoundNearest) == -0.5
     @test rem(T(1.5), T(2), RoundDown)    == 1.5
     @test rem(T(1.5), T(2), RoundUp)      == -0.5
     @test rem(T(1.5), T(2), RoundFromZero) == -0.5
+    @test rem(T(1.5), T(2), RoundNearestTiesUp) == -0.5
+    @test rem(T(1.5), T(2), RoundNearestTiesAway) == -0.5
     @test rem(T(-1), T(2), RoundToZero)  == -1
     @test rem(T(-1), T(2), RoundNearest) == -1
     @test rem(T(-1), T(2), RoundDown)    == 1
     @test rem(T(-1), T(2), RoundUp)      == -1
     @test rem(T(-1), T(2), RoundFromZero) == 1
+    @test rem(T(-1), T(2), RoundNearestTiesUp) == -1
+    @test rem(T(-1), T(2), RoundNearestTiesAway) == 1
     @test rem(T(-1.5), T(2), RoundToZero)  == -1.5
     @test rem(T(-1.5), T(2), RoundNearest) == 0.5
     @test rem(T(-1.5), T(2), RoundDown)    == 0.5
     @test rem(T(-1.5), T(2), RoundUp)      == -1.5
     @test rem(T(-1.5), T(2), RoundFromZero) == 0.5
-    for mode in [RoundToZero, RoundNearest, RoundDown, RoundUp, RoundFromZero]
+    @test rem(T(-1.5), T(2), RoundNearestTiesUp) == 0.5
+    @test rem(T(-1.5), T(2), RoundNearestTiesAway) == 0.5
+    for mode in [RoundToZero, RoundNearest, RoundDown, RoundUp, RoundFromZero, RoundNearestTiesUp, RoundNearestTiesAway]
         @test isnan(rem(T(1), T(0), mode))
         @test isnan(rem(T(Inf), T(2), mode))
         @test isnan(rem(T(1), T(NaN), mode))
@@ -2759,6 +2827,8 @@ end
     @test isequal(rem(nextfloat(typemin(T)), T(2), RoundDown),     0.0)
     @test isequal(rem(nextfloat(typemin(T)), T(2), RoundUp),      -0.0)
     @test isequal(rem(nextfloat(typemin(T)), T(2), RoundFromZero), 0.0)
+    @test isequal(rem(nextfloat(typemin(T)), T(2), RoundNearestTiesUp), -0.0)
+    @test isequal(rem(nextfloat(typemin(T)), T(2), RoundNearestTiesAway), 0.0)
 end
 
 @testset "rem for $T RoundNearest" for T in (Int8, Int16, Int32, Int64, Int128)
@@ -3313,5 +3383,46 @@ end
 @testset "irrational special values" begin
     for v ∈ (π, ℯ, γ, catalan, φ)
         @test v === typemin(v) === typemax(v)
+    end
+end
+
+@testset "irrational negative integer power (#61284)" begin
+    p = -2 # test non literal power
+    for x in (π, ℯ, γ, catalan, φ)
+        @test x^p == float(x)^p
+    end
+end
+
+@testset "rem rounded to nearest w/wo ties (#60916)" begin
+    Random.seed!(123)
+    setprecision(BigFloat, 64) do
+        for T in (Float16, Float32, Float64, BigFloat)
+            p = precision(T) + 1
+            step = T === BigFloat ? 3 : 1
+            for e1 in 0:p, e2 in e1-p:step:p+e1, s1 in (+1, -1), s2 in (+1, -1)
+                x = ldexp(s1*rand(T), e1)
+                y = ldexp(s2*rand(T), e2)
+                rd = rem(x, y, RoundDown)
+                ru = rem(x, y, RoundUp)
+                if abs(rd) != abs(ru)
+                    # no tie
+                    nearest = abs(rd) < abs(ru) ? rd : ru
+                    @test isequal(rem(x, y, RoundNearestTiesUp), nearest)
+                    @test isequal(rem(x, y, RoundNearestTiesAway), nearest)
+                    @test isequal(rem(x, y, RoundNearest), nearest)
+                    # try to find close x,y pair such that there is a tie
+                    y = Base.truncbits(y, trunc(Int, p/4))
+                    q = round(x/y, RoundFromZero)
+                    x = q*y + y/2
+                    rd = rem(x, y, RoundDown)
+                    ru = rem(x, y, RoundUp)
+                end
+                if abs(rd) == abs(ru)
+                    # tie
+                    @test rem(x, y, RoundNearestTiesUp) == rem(x, y, RoundUp)
+                    @test rem(x, y, RoundNearestTiesAway) == rem(x, y, RoundFromZero)
+                end
+            end
+        end
     end
 end

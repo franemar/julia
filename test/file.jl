@@ -26,13 +26,45 @@ let err = nothing
     end
 end
 
+@testset "readdir" begin
+    @test !ispath("does/not/exist")
+    @test !isdir("does/not/exist")
+    @test_throws Base.IOError readdir("does/not/exist")
+    @test_throws Base.IOError readdir("does/not/exist", DirEntry)
+
+    mktempdir() do dir
+        touch(joinpath(dir, "afile.txt"))
+        mkdir(joinpath(dir, "adir"))
+        touch(joinpath(dir, "adir", "bfile.txt"))
+        @test length(readdir(dir)) == 2
+        @test readdir(dir) == basename.(readdir(dir, DirEntry))
+        for p in readdir(dir, join=true)
+            if isdir(p)
+                @test only(readdir(p)) == "bfile.txt"
+            else
+                @test isfile(p)
+                @test p == joinpath(dir, "afile.txt")
+            end
+        end
+        for e in readdir(dir, DirEntry)
+            if isdir(e)
+                @test only(readdir(e)) == "bfile.txt"
+                @test basename(only(readdir(e, DirEntry))) == "bfile.txt"
+            else
+                @test isfile(e)
+                @test basename(e) == "afile.txt"
+            end
+        end
+    end
+end
+
 if !Sys.iswindows() || Sys.windows_version() >= Sys.WINDOWS_VISTA_VER
     dirlink = joinpath(dir, "dirlink")
     symlink(subdir, dirlink)
     @test stat(dirlink) == stat(subdir)
     @test readdir(dirlink) == readdir(subdir)
-    @test map(o->o.names, Base.Filesystem._readdirx(dirlink)) == map(o->o.names, Base.Filesystem._readdirx(subdir))
-    @test realpath.(Base.Filesystem._readdirx(dirlink)) == realpath.(Base.Filesystem._readdirx(subdir))
+    @test basename.(readdir(dirlink, DirEntry)) == basename.(readdir(subdir, DirEntry))
+    @test realpath.(readdir(dirlink, DirEntry)) == realpath.(readdir(subdir, DirEntry))
 
     # relative link
     relsubdirlink = joinpath(subdir, "rel_subdirlink")
@@ -40,7 +72,8 @@ if !Sys.iswindows() || Sys.windows_version() >= Sys.WINDOWS_VISTA_VER
     symlink(reldir, relsubdirlink)
     @test stat(relsubdirlink) == stat(subdir2)
     @test readdir(relsubdirlink) == readdir(subdir2)
-    @test Base.Filesystem._readdirx(relsubdirlink) == Base.Filesystem._readdirx(subdir2)
+    @test basename.(readdir(relsubdirlink, DirEntry)) == basename.(readdir(subdir2, DirEntry))
+    @test realpath.(readdir(relsubdirlink, DirEntry)) == realpath.(readdir(subdir2, DirEntry))
 
     # creation of symlink to directory that does not yet exist
     new_dir = joinpath(subdir, "new_dir")
@@ -59,7 +92,7 @@ if !Sys.iswindows() || Sys.windows_version() >= Sys.WINDOWS_VISTA_VER
     mkdir(new_dir)
     touch(foo_file)
     @test readdir(new_dir) == readdir(nedlink)
-    @test realpath.(Base.Filesystem._readdirx(new_dir)) == realpath.(Base.Filesystem._readdirx(nedlink))
+    @test realpath.(readdir(new_dir, DirEntry)) == realpath.(readdir(nedlink, DirEntry))
 
     rm(foo_file)
     rm(new_dir)
@@ -392,27 +425,20 @@ if Sys.iswindows()
     @test filemode(file) & 0o777 == permissions
     chmod(dir, 0o666, recursive=true)  # Reset permissions in case someone wants to use these later
 else
-    function get_umask()
-        umask = ccall(:umask, UInt32, (UInt32,), 0)
-        ccall(:umask, UInt32, (UInt32,), umask)
-        return umask
-    end
-
     mktempdir() do tmpdir
-        umask = get_umask()
         tmpfile=joinpath(tmpdir, "tempfile.txt")
         tmpfile2=joinpath(tmpdir, "tempfile2.txt")
         touch(tmpfile)
         cp(tmpfile, tmpfile2)
-        @test filemode(tmpfile) & (~umask) == filemode(tmpfile2)
+        @test filemode(tmpfile) == filemode(tmpfile2)
         rm(tmpfile2)
         chmod(tmpfile, 0o777)
         cp(tmpfile, tmpfile2)
-        @test filemode(tmpfile) & (~umask) == filemode(tmpfile2)
+        @test filemode(tmpfile) == filemode(tmpfile2)
         rm(tmpfile2)
         chmod(tmpfile, 0o707)
         cp(tmpfile, tmpfile2)
-        @test filemode(tmpfile) & (~umask) == filemode(tmpfile2)
+        @test filemode(tmpfile) == filemode(tmpfile2)
         rm(tmpfile2)
         linkfile=joinpath(dir, "tempfile.txt")
         symlink(tmpfile, linkfile)
@@ -452,7 +478,7 @@ end
             touch("afile")
             try
                 # remove permission to access this folder
-                # to cause cause EACCESS-denied errors
+                # to cause EACCES-denied errors
                 @static if Sys.iswindows()
                     @test ccall((:ImpersonateAnonymousToken, "Advapi32.dll"), stdcall, Cint, (Libc.WindowsRawSocket,),
                                 ccall(:GetCurrentThread, Libc.WindowsRawSocket, ())) != 0
@@ -669,7 +695,7 @@ end
     PATH_PREFIX = Sys.iswindows() ? "C:\\" : "/tmp/" * "x"^255   # we want a long path on UNIX so that we test buffer resizing in `tempdir`
     # Warning: On Windows uv_os_tmpdir internally calls GetTempPathW. The max string length for
     # GetTempPathW is 261 (including the implied trailing backslash), not the typical length 259.
-    # We thus use 260 (with implied trailing slash backlash this then gives 261 chars)
+    # We thus use 260 (with implied trailing slash backslash this then gives 261 chars)
     # NOTE: not the actual max path on UNIX, but true in the Windows case for this function.
     # NOTE: we subtract 9 to account for i = 0:9.
     MAX_PATH = (Sys.iswindows() ? 260 - length(PATH_PREFIX) : 255)  - 9
@@ -1357,8 +1383,8 @@ if !Sys.iswindows() || Sys.windows_version() >= Sys.WINDOWS_VISTA_VER
         @test_throws(ArgumentError("'$nonexisting_src' is not a directory. Use `cp(src, dst)`"),
                      Base.cptree(nonexisting_src, dst; force=true, follow_symlinks=true))
         # cp
-        @test_throws Base._UVError("open($(repr(nonexisting_src)), $(Base.JL_O_RDONLY), 0)", Base.UV_ENOENT) cp(nonexisting_src, dst; force=true, follow_symlinks=false)
-        @test_throws Base._UVError("open($(repr(nonexisting_src)), $(Base.JL_O_RDONLY), 0)", Base.UV_ENOENT) cp(nonexisting_src, dst; force=true, follow_symlinks=true)
+        @test_throws Base._UVError("copyfile", Base.UV_ENOENT) cp(nonexisting_src, dst; force=true, follow_symlinks=false)
+        @test_throws Base._UVError("copyfile", Base.UV_ENOENT) cp(nonexisting_src, dst; force=true, follow_symlinks=true)
         # mv
         @test_throws Base._UVError("rename($(repr(nonexisting_src)), $(repr(dst)))", Base.UV_ENOENT) mv(nonexisting_src, dst; force=true)
     end
@@ -1780,10 +1806,10 @@ rm(dirwalk, recursive=true)
                 touch(randstring())
             end
             @test issorted(readdir())
-            @test issorted(Base.Filesystem._readdirx())
-            @test map(o->o.name, Base.Filesystem._readdirx()) == readdir()
-            @test map(joinpath, Base.Filesystem._readdirx()) == readdir(join=true)
-            @test count(isfile, readdir(join=true)) == count(isfile, Base.Filesystem._readdirx())
+            @test issorted(readdir(DirEntry))
+            @test basename.(readdir(DirEntry)) == readdir()
+            @test joinpath.(readdir(DirEntry)) == readdir(join=true)
+            @test count(isfile, readdir(join=true)) == count(isfile, readdir(DirEntry))
         end
     end
 end
@@ -1841,6 +1867,69 @@ mktempdir() do dir
     # issue 54826
     namepath_dirpath = joinpath(dir, "x", "y", "z", "")
     @test mkpath(namepath_dirpath) == namepath_dirpath
+end
+
+@testset "mv and cp do not destroy the source" begin
+    mktempdir() do dir
+        # a destination that contains the source is not removed
+        pkg = joinpath(dir, "pkg")
+        src = joinpath(pkg, "pkg-1.0")
+        mkpath(joinpath(src, "src"))
+        write(joinpath(src, "src", "a.jl"), "code")
+        @test_throws ArgumentError mv(src, pkg; force=true)
+        @test_throws ArgumentError cp(src, pkg; force=true)
+        @test read(joinpath(src, "src", "a.jl"), String) == "code"
+
+        # a directory is not moved or copied into itself
+        q = joinpath(dir, "q")
+        mkpath(joinpath(q, "sub"))
+        write(joinpath(q, "f"), "f")
+        for dst in (joinpath(q, "sub", "inner"), joinpath(q, "sub")), force in (false, true)
+            @test_throws ArgumentError mv(q, dst; force)
+            @test_throws ArgumentError cp(q, dst; force)
+        end
+        @test !ispath(joinpath(q, "sub", "inner"))
+        @test isdir(joinpath(q, "sub"))
+        @test read(joinpath(q, "f"), String) == "f"
+
+        if !Sys.iswindows()
+            # also through a symlinked path
+            link = joinpath(dir, "qlink")
+            symlink(q, link)
+            @test_throws ArgumentError cp(q, joinpath(link, "sub", "inner"))
+            @test !ispath(joinpath(q, "sub", "inner"))
+
+            # a symlink as the immediate parent of the destination
+            alias = joinpath(dir, "qalias")
+            symlink(q, alias)
+            @test_throws ArgumentError cp(q, joinpath(alias, "new"))
+            @test !ispath(joinpath(q, "new"))
+
+            # `..` after a symlink is resolved by the filesystem, not lexically
+            victim = joinpath(dir, "victim")
+            mkpath(joinpath(victim, "sub"))
+            write(joinpath(victim, "sub", "f"), "keep")
+            symlink(joinpath(victim, "sub"), joinpath(dir, "subalias"))
+            @test_throws ArgumentError cp(joinpath(dir, "subalias", "..", "sub"), victim; force=true)
+            # copying a symlink's target over a directory containing it
+            @test_throws ArgumentError cp(joinpath(dir, "subalias"), victim; force=true, follow_symlinks=true)
+            @test_throws ArgumentError Base.cptree(joinpath(dir, "subalias"), victim; force=true)
+            @test read(joinpath(victim, "sub", "f"), String) == "keep"
+
+            # allowed: removing a symlink to an ancestor leaves the source alone
+            up = joinpath(dir, "up")
+            symlink(dir, up)
+            @test cp(joinpath(q, "f"), up; force=true) == up
+            @test isfile(up) && !islink(up)
+            @test read(joinpath(q, "f"), String) == "f"
+            # allowed: a destination that only looks inside the source before resolving `..`
+            mkpath(joinpath(dir, "elsewhere", "child"))
+            symlink(joinpath(dir, "elsewhere", "child"), joinpath(q, "link"))
+            out = joinpath(q, "link", "..", "out")
+            @test cp(q, out) == out
+            @test isfile(joinpath(dir, "elsewhere", "out", "f"))
+        end
+    end
 end
 @test mkpath("") == ""
 @test mkpath("/") == "/"
@@ -1962,7 +2051,7 @@ end
                     # Cannot delete the working directory on Windows
                     rm(dir)
                     @test_throws Base._UVError("pwd()", Base.UV_ENOENT) pwd()
-                    Base.repl_cmd(@cmd("cd \\~"), io)
+                    Base.repl_cmd(@cmd("cd ~"), io)
                 end
             end
         end
@@ -2049,7 +2138,7 @@ end
         touch(fpath)
         @test ispath(fpath)
 
-        # Test that we can actually set the executable/readable/writeable bit on all platforms.
+        # Test that we can actually set the executable/readable/writable bit on all platforms.
         chmod(fpath, 0o644)
         @test !Sys.isexecutable(fpath)
         @test Sys.isreadable(fpath)
