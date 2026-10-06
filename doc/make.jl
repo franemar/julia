@@ -71,21 +71,31 @@ end
 
 
 function flatten_doc_pages(items)
+
     if items isa AbstractString
         return [items]
     end
+
+
     out = String[]
+
     for item in items
         if item isa Pair
             append!(out, flatten_doc_pages(item.second))
+
+            #println("[DEBUG] - flatten_doc_pages: item is a Pair, key=$(item.first), value=$(item.second)")
         elseif item isa AbstractVector
             append!(out, flatten_doc_pages(item))
+
+            # println("[DEBUG] - flatten_doc_pages: item is an AbstractVector, contents=$(item)")
         elseif item isa AbstractString
             push!(out, item)
         else
-            error("Unexpected doc page entry: $(repr(item))")
+            #error("Unexpected doc page entry: $(repr(item))")
+            @warn("Unexpected doc page entry: $(repr(item))")
         end
     end
+
     return out
 end
 
@@ -516,7 +526,7 @@ const PAGES = [
 else
 const PAGES = [
     "Julia Documentation" => "index.md",
-    hide("NEWS.md"),
+    "News.md" => "NEWS.md", #Change from `hide("NEWS.md")` as a form of snapshot of the release notes for the current version of Julia
     "Manual" => Manual,
     "Base" => BaseDocs,
     "Standard Library" => StdlibDocs,
@@ -754,18 +764,15 @@ end
 f = open("./_build/html/en/gen-pandoc-Epub.sh", "w");
 
 write(f, "#!/bin/bash\n")
+write(f, "pandoc -f html --resource-path=. -t epub3 -o juliadocs.epub \\\n") # Pandoc is not resolving the assets path correctly.
+write(f, "index.html \\\n");
 
-# ☝ Check if needed: --resource-path=./assets #
-
-write(f, "pandoc -f html -t epub3 -o juliadocs.epub \\\n")
-write(f, "index.md \\\n");
-
-for i in vcat(flatten_doc_pages(Manual),
-      flatten_doc_pages(BaseDocs),
+for i in vcat((Manual),
+      (BaseDocs),
       flatten_doc_pages(StdlibDocs),
       flatten_doc_pages(DevDocsTOC)
     )
-    write(f, string(replace(i, "md" => "html"), " \\\n"));
+    write(f, string(replace(i, ".md" => ".html"), " \\\n"));
 end
 
 close(f);
