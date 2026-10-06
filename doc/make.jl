@@ -70,21 +70,18 @@ cd(joinpath(buildrootdoc, "src")) do
 end
 
 
-function flatten_doc_pages(list_name, items)
-    # Debug
-    println("flatten_doc_pages: \"", list_name, "\": ", items)
-
+function flatten_doc_pages(items)
+    if items isa AbstractString
+        return [items]
+    end
     out = String[]
     for item in items
         if item isa Pair
-            append!(out, flatten_doc_pages("\" * list_name * "-Pair\"", item.second))
+            append!(out, flatten_doc_pages(item.second))
         elseif item isa AbstractVector
-            append!(out, flatten_doc_pages("\" * list_name * "-Vector\"", item))
+            append!(out, flatten_doc_pages(item))
         elseif item isa AbstractString
             push!(out, item)
-
-            # Debug
-            println("flatten_doc_pages: \"", list_name, "-AbstractString\": ", item)
         else
             error("Unexpected doc page entry: $(repr(item))")
         end
@@ -761,11 +758,12 @@ write(f, "#!/bin/bash\n")
 # ☝ Check if needed: --resource-path=./assets #
 
 write(f, "pandoc -f html -t epub3 -o juliadocs.epub \\\n")
+write(f, "index.md \\\n");
 
-for i in vcat("index.html", flatten_doc_pages("Manual", Manual),
-      flatten_doc_pages("BaseDocs", BaseDocs), 
-      flatten_doc_pages("StdlibDocs", StdlibDocs),
-      flatten_doc_pages("DevDocsTOC", DevDocsTOC)
+for i in vcat(flatten_doc_pages(Manual),
+      flatten_doc_pages(BaseDocs),
+      flatten_doc_pages(StdlibDocs),
+      flatten_doc_pages(DevDocsTOC)
     )
     write(f, string(replace(i, "md" => "html"), " \\\n"));
 end
