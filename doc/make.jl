@@ -69,6 +69,30 @@ cd(joinpath(buildrootdoc, "src")) do
     end
 end
 
+
+function flatten_doc_pages(list_name, items)
+    # Debug
+    println("flatten_doc_pages: \"", list_name, "\": ", items)
+
+    out = String[]
+    for item in items
+        if item isa Pair
+            append!(out, flatten_doc_pages("\" * list_name * "-Pair\"", item.second))
+        elseif item isa AbstractVector
+            append!(out, flatten_doc_pages("\" * list_name * "-Vector\"", item))
+        elseif item isa AbstractString
+            push!(out, item)
+
+            # Debug
+            println("flatten_doc_pages: \"", list_name, "-AbstractString\": ", item)
+        else
+            error("Unexpected doc page entry: $(repr(item))")
+        end
+    end
+    return out
+end
+
+
 # Because we have standard libraries that are hosted outside of the julia repo,
 # but their docs are included in the manual, we need to populate the remotes argument
 # of makedocs(), to make sure that Documenter knows how to resolve the directories
@@ -738,7 +762,11 @@ write(f, "#!/bin/bash\n")
 
 write(f, "pandoc -f html -t epub3 -o juliadocs.epub \\\n")
 
-for i in vcat("index.html", Manual, BaseDocs, StdlibDocs, DevDocsTOC)
+for i in vcat("index.html", flatten_doc_pages("Manual", Manual),
+      flatten_doc_pages("BaseDocs", BaseDocs), 
+      flatten_doc_pages("StdlibDocs", StdlibDocs),
+      flatten_doc_pages("DevDocsTOC", DevDocsTOC)
+    )
     write(f, string(replace(i, "md" => "html"), " \\\n"));
 end
 
