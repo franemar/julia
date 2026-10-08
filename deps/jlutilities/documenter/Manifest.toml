@@ -3,7 +3,7 @@
 environment_id = "2d4683aa-8244-4aff-82aa-a2594565e0f8"  # generated
 julia_version = "1.14.0-DEV"
 manifest_format = "2.2"
-project_hash = "1e9ffa7d4739f7d125a5e2c66af8747a8effd889"
+project_hash = "3d31d033a03e4835c57d7d426732e69728d251d3"
 
 [[deps.ANSIColoredPrinters]]
 git-tree-sha1 = "574baf8110975760d391c710b6341da1afa48d8c"
@@ -88,6 +88,17 @@ version = "1.19.0"
 
     [deps.Documenter.syntax]
     julia_version = "1.6.0"
+
+[[deps.DocumenterMarkdown]]
+deps = ["ANSIColoredPrinters", "Base64", "Documenter", "MarkdownAST"]
+git-tree-sha1 = "4bb858f31f8823db9aab1985347626a5ed34905a"
+repo-rev = "master"
+repo-url = "https://github.com/SamuelBrand1/DocumenterMarkdown.jl.git"
+uuid = "997ab1e6-3595-5248-9280-8efb232c3433"
+version = "0.3.0"
+
+    [deps.DocumenterMarkdown.syntax]
+    julia_version = "1.10.0"
 
 [[deps.Downloads]]
 deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
@@ -338,7 +349,7 @@ version = "2.8.7"
     julia_version = "1.6.0"
 
 [[deps.Pkg]]
-deps = ["ArgTools", "Artifacts", "Dates", "Downloads", "FileWatching", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "Random", "SHA", "TOML", "Tar", "UUIDs", "Zstd_jll", "p7zip_jll"]
+deps = ["ArgTools", "Artifacts", "Dates", "Downloads", "FileWatching", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "Zstd_jll", "libpicosat_jll", "p7zip_jll"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 version = "1.14.0"
 weakdeps = ["REPL"]
@@ -513,6 +524,14 @@ uuid = "3161d3a3-bdf6-5164-811a-617609db77b4"
 version = "1.5.7+1"
 
     [deps.Zstd_jll.syntax]
+    julia_version = "1.6.0"
+
+[[deps.libpicosat_jll]]
+deps = ["Artifacts", "Libdl"]
+uuid = "6b231c3b-13f8-5ced-86ae-8860c7f75d86"
+version = "965.0.3+0"
+
+    [deps.libpicosat_jll.syntax]
     julia_version = "1.6.0"
 
 [[deps.nghttp2_jll]]

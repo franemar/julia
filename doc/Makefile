@@ -1,7 +1,7 @@
 # Makefile for building documentation
 
 .PHONY: default
-default: html
+default: markdown
 
 # You can set these variables from the command line.
 SRCDIR           := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -15,6 +15,7 @@ help:
 	@echo "Please use 'make <target>' where <target> is one of"
 	@echo "  html  to make standalone HTML files"
 	@echo "  pdf   to make standalone PDF file"
+	@echo "  markdown to make standalone Markdown files"
 	@echo
 	@echo "To run linkcheck, use 'make <target> linkcheck=true'"
 	@echo "To run doctests, use 'make <target> doctest=true'"

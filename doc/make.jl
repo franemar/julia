@@ -28,7 +28,10 @@ push!(DEPOT_PATH, joinpath(buildroot, "deps", "jlutilities", "depot"))
 push!(DEPOT_PATH, abspath(Sys.BINDIR, Base.DATAROOTDIR, "julia"))
 using Pkg
 Pkg.activate(documenter_project_dir)
+#Pkg.resolve()
 Pkg.instantiate()
+Pkg.add(url="https://github.com/SamuelBrand1/DocumenterMarkdown.jl.git") #rev="DocumenterMarkdown"
+
 
 if "deps" in ARGS
     exit()
@@ -174,6 +177,10 @@ end
 # Check if we are building a PDF
 const render_pdf = "pdf" in ARGS
 const render_markdown = "markdown" in ARGS
+
+#debug
+#println("[DEBUG] - Rendering arg: ", string(render_markdown))
+#println("[DEBUG] - ARGS: ", string(ARGS))
 
 # Generate a suitable markdown file from NEWS.md and put it in src
 function generate_markdown(basename)
@@ -614,21 +621,7 @@ const format = if render_pdf
         platform = "texplatform=docker" in ARGS ? "docker" : "native"
     )
 elseif render_markdown
-     Documenter.Markdown(
-        prettyurls = ("deploy" in ARGS),
-        canonical = ("deploy" in ARGS) ? "https://docs.julialang.org/en/v1/" : nothing,
-        assets = [
-            "assets/julia-manual.css",
-            "assets/julia.ico",
-        ],
-        analytics = "UA-28835595-6",
-        collapselevel = 1,
-        sidebar_sitename = false,
-        ansicolor = true,
-        size_threshold = 800 * 2^10, # 800 KiB
-        size_threshold_warn = 200 * 2^10, # the manual has quite a few large pages, so we warn at 200+ KiB only
-        inventory_version = VERSION,
-    )
+     DocumenterMarkdown.Markdown()
 else
     Documenter.HTML(
         prettyurls = ("deploy" in ARGS),
@@ -647,7 +640,7 @@ else
     )
 end
 
-const output_path = joinpath(buildrootdoc, "_build", (render_pdf ? "pdf" : "html"), "en")
+const output_path = joinpath(buildrootdoc, "_build", (render_markdown ? "markdown" : render_pdf ? "pdf" : "html"), "en")
 makedocs(
     source    = joinpath(buildrootdoc, "src"),
     build     = output_path,
