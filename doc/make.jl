@@ -35,6 +35,7 @@ if "deps" in ARGS
 end
 
 using Documenter
+using DocumenterMarkdown
 import LibGit2
 
 baremodule GenStdLib end
@@ -172,6 +173,7 @@ end
 
 # Check if we are building a PDF
 const render_pdf = "pdf" in ARGS
+const render_markdown = "markdown" in ARGS
 
 # Generate a suitable markdown file from NEWS.md and put it in src
 function generate_markdown(basename)
@@ -610,6 +612,22 @@ DocMeta.setdocmeta!(
 const format = if render_pdf
     Documenter.LaTeX(
         platform = "texplatform=docker" in ARGS ? "docker" : "native"
+    )
+elseif render_markdown
+     Documenter.Markdown(
+        prettyurls = ("deploy" in ARGS),
+        canonical = ("deploy" in ARGS) ? "https://docs.julialang.org/en/v1/" : nothing,
+        assets = [
+            "assets/julia-manual.css",
+            "assets/julia.ico",
+        ],
+        analytics = "UA-28835595-6",
+        collapselevel = 1,
+        sidebar_sitename = false,
+        ansicolor = true,
+        size_threshold = 800 * 2^10, # 800 KiB
+        size_threshold_warn = 200 * 2^10, # the manual has quite a few large pages, so we warn at 200+ KiB only
+        inventory_version = VERSION,
     )
 else
     Documenter.HTML(

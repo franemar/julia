@@ -70,6 +70,12 @@ pdf: deps
 	$(JULIA_EXECUTABLE) --color=yes $(call cygpath_w,$(SRCDIR)/make.jl) -- pdf $(DOCUMENTER_OPTIONS)
 	@echo "Build finished."
 
+.PHONY: markdown
+markdown: deps
+	@echo "Building Markdown documentation."
+	$(JULIA_EXECUTABLE) --color=yes $(call cygpath_w,$(SRCDIR)/make.jl) -- markdown $(DOCUMENTER_OPTIONS)
+	@echo "Build finished. The Markdown pages are in _build/markdown."
+
 # The deploy target should only be called in CI builds
 .PHONY: deploy
 deploy: deps
