@@ -774,21 +774,42 @@ end
 # Generation and export of pandoc's command
 f = open("./_build/html/en/gen-pandoc-Epub.sh", "w");
 
-write(f, "#!/bin/bash\n")
-write(f, "pandoc -f html --resource-path=. -t epub3 -o juliadocs.epub \\\n") # Pandoc is not resolving the assets path correctly.
-write(f, "index.html \\\n");
+write(f, raw"""#!/bin/bash
+set -euo pipefail
 
-for i in vcat((Manual),
-      (BaseDocs),
-      flatten_doc_pages(StdlibDocs),
-      flatten_doc_pages(DevDocsTOC)
-    )
-    write(f, string(replace(i, ".md" => ".html"), " \\\n"));
-end
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$script_dir"
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+for dir in . manual base stdlib devdocs; do
+    if [ "$dir" = "." ]; then
+        out="$tmpdir/index.html"
+        printf '<h1>index</h1>\n' > "$out"
+        cat index.html >> "$out"
+        continue
+    fi
+
+    out="$tmpdir/${dir}.html"
+    printf '<h1>%s</h1>\n' "$dir" > "$out"
+
+    for f in "$dir"/*.html; do
+        [ -e "$f" ] || continue
+        printf '\n<hr />\n' >> "$out"
+        cat "$f" >> "$out"
+    done
+done
+
+pandoc -f html --resource-path=. -t epub3 -o juliadocs.epub \
+    "$tmpdir/index.html" \
+    "$tmpdir/manual.html" \
+    "$tmpdir/base.html" \
+    "$tmpdir/stdlib.html" \
+    "$tmpdir/devdocs.html"
+""")
 
 close(f);
-
-
 
 if "deploy" in ARGS
     deploydocs(

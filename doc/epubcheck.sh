@@ -1,0 +1,1 @@
+java -jar /opt/epubcheck-5.4.0/epubcheck.jar juliadocs.epub --json juliadocs.epubcheck-5.4.0.log.json
