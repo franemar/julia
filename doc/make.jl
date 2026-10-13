@@ -802,7 +802,7 @@ for dir in . manual base stdlib devdocs; do
 done
 
 pandoc --resource-path=. -t epub3 -o juliadocs.epub \
-    ../metadata.yaml \
+    ../../../metadata.yaml \
     "$tmpdir/index.md" \
     "$tmpdir/manual.md" \
     "$tmpdir/base.md" \
