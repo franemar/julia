@@ -772,7 +772,7 @@ for i in DevDocs
 end
 
 # Generation and export of pandoc's command
-f = open("./_build/html/en/gen-pandoc-Epub.sh", "w");
+f = open("./_build/markdown/en/gen-pandoc-Epub.sh", "w");
 
 write(f, raw"""#!/bin/bash
 set -euo pipefail
@@ -785,28 +785,29 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 for dir in . manual base stdlib devdocs; do
     if [ "$dir" = "." ]; then
-        out="$tmpdir/index.html"
-        printf '<h1>index</h1>\n' > "$out"
-        cat index.html >> "$out"
+        out="$tmpdir/index.md"
+        printf '# index\n' > "$out"
+        cat index.md >> "$out"
         continue
     fi
 
-    out="$tmpdir/${dir}.html"
-    printf '<h1>%s</h1>\n' "$dir" > "$out"
+    out="$tmpdir/${dir}.md"
+    printf '# %s\n' "$dir" > "$out"
 
-    for f in "$dir"/*.html; do
+    for f in "$dir"/*.md; do
         [ -e "$f" ] || continue
-        printf '\n<hr />\n' >> "$out"
+        printf '\n---\n' >> "$out"
         cat "$f" >> "$out"
     done
 done
 
-pandoc -f html --resource-path=. -t epub3 -o juliadocs.epub \
-    "$tmpdir/index.html" \
-    "$tmpdir/manual.html" \
-    "$tmpdir/base.html" \
-    "$tmpdir/stdlib.html" \
-    "$tmpdir/devdocs.html"
+pandoc --resource-path=. -t epub3 -o juliadocs.epub \
+    ../metadata.yaml \
+    "$tmpdir/index.md" \
+    "$tmpdir/manual.md" \
+    "$tmpdir/base.md" \
+    "$tmpdir/stdlib.md" \
+    "$tmpdir/devdocs.md"
 """)
 
 close(f);
